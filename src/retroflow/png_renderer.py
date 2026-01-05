@@ -6,9 +6,11 @@ Renders flowcharts as high-resolution PNG images with professional styling.
 
 import math
 import os
-from typing import Tuple
+from typing import Dict, List, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
+
+from .edge_routing import create_router, EdgeRoute
 
 
 class PNGRenderer:
@@ -342,130 +344,63 @@ class PNGRenderer:
             current_y += line_h + line_spacing
 
     def _draw_connections(self, draw: ImageDraw.Draw, graph, layout):
-        """Draw arrows between connected nodes."""
+        """Draw arrows between connected nodes using orthogonal edge routing."""
         edges = layout.get_edges_for_rendering()
         line_width = max(1, self.scale)
 
-        # Group edges by connection type for better routing
+        # Create the routing system
+        grid, port_manager, router = create_router(self.node_positions)
+
+        # Detect bidirectional edges
+        edge_set = {(s, t) for s, t, _ in edges}
+        bidirectional = set()
+        for source, target, _ in edges:
+            if (target, source) in edge_set:
+                bidirectional.add((min(source, target), max(source, target)))
+
+        # Route all edges
+        processed = set()
         for source, target, is_feedback in edges:
-            if source not in self.node_positions or target not in self.node_positions:
+            # Check if this is a bidirectional edge
+            bidir_key = (min(source, target), max(source, target))
+            is_bidir = bidir_key in bidirectional
+
+            # Skip reverse direction of bidirectional edges
+            if is_bidir and bidir_key in processed:
                 continue
+            if is_bidir:
+                processed.add(bidir_key)
 
-            src_x, src_y, src_w, src_h = self.node_positions[source]
-            tgt_x, tgt_y, tgt_w, tgt_h = self.node_positions[target]
+            # Route the edge
+            route = router.route_edge(source, target, is_bidir)
+            if route:
+                self._draw_routed_edge(draw, route, line_width)
 
-            # Determine which sides to connect based on positions
-            src_cx = src_x + src_w // 2
-            src_cy = src_y + src_h // 2
-            tgt_cx = tgt_x + tgt_w // 2
-            tgt_cy = tgt_y + tgt_h // 2
-
-            # For horizontal flow, prefer right->left connections
-            if self.horizontal_flow:
-                if tgt_cx > src_cx + src_w // 2:
-                    # Target is to the right - connect right side to left side
-                    start = (src_x + src_w, src_cy)
-                    end = (tgt_x, tgt_cy)
-                    self._draw_horizontal_arrow(draw, start, end, line_width)
-                elif tgt_cx < src_cx - src_w // 2:
-                    # Target is to the left - connect left side to right side
-                    start = (src_x, src_cy)
-                    end = (tgt_x + tgt_w, tgt_cy)
-                    self._draw_horizontal_arrow(
-                        draw, start, end, line_width, reverse=True
-                    )
-                elif tgt_cy > src_cy:
-                    # Target is below
-                    start = (src_cx, src_y + src_h)
-                    end = (tgt_cx, tgt_y)
-                    self._draw_vertical_arrow(draw, start, end, line_width)
-                else:
-                    # Target is above
-                    start = (src_cx, src_y)
-                    end = (tgt_cx, tgt_y + tgt_h)
-                    self._draw_vertical_arrow(
-                        draw, start, end, line_width, reverse=True
-                    )
-            else:
-                # Vertical flow
-                if tgt_cy > src_cy + src_h // 2:
-                    start = (src_cx, src_y + src_h)
-                    end = (tgt_cx, tgt_y)
-                    self._draw_vertical_arrow(draw, start, end, line_width)
-                elif tgt_cy < src_cy - src_h // 2:
-                    start = (src_cx, src_y)
-                    end = (tgt_cx, tgt_y + tgt_h)
-                    self._draw_vertical_arrow(
-                        draw, start, end, line_width, reverse=True
-                    )
-                elif tgt_cx > src_cx:
-                    start = (src_x + src_w, src_cy)
-                    end = (tgt_x, tgt_cy)
-                    self._draw_horizontal_arrow(draw, start, end, line_width)
-                else:
-                    start = (src_x, src_cy)
-                    end = (tgt_x + tgt_w, tgt_cy)
-                    self._draw_horizontal_arrow(
-                        draw, start, end, line_width, reverse=True
-                    )
-
-    def _draw_horizontal_arrow(
-        self,
-        draw: ImageDraw.Draw,
-        start: Tuple[int, int],
-        end: Tuple[int, int],
-        line_width: int,
-        reverse: bool = False,
+    def _draw_routed_edge(
+        self, draw: ImageDraw.Draw, route: EdgeRoute, line_width: int
     ):
-        """Draw an arrow with horizontal-first routing."""
-        x1, y1 = start
-        x2, y2 = end
+        """Draw a routed edge with waypoints."""
+        waypoints = route.waypoints
+        if len(waypoints) < 2:
+            return
 
-        if abs(y2 - y1) < 5:
-            # Nearly horizontal - draw straight line
-            draw.line([start, end], fill=self.line_color, width=line_width)
-        else:
-            # L-shaped routing: horizontal first, then vertical
-            mid_x = (x1 + x2) // 2
-            points = [(x1, y1), (mid_x, y1), (mid_x, y2), (x2, y2)]
-            for i in range(len(points) - 1):
-                draw.line(
-                    [points[i], points[i + 1]],
-                    fill=self.line_color,
-                    width=line_width,
-                )
+        # Draw the path segments
+        for i in range(len(waypoints) - 1):
+            p1 = waypoints[i]
+            p2 = waypoints[i + 1]
+            draw.line([p1, p2], fill=self.line_color, width=line_width)
 
-        # Draw arrowhead
-        self._draw_arrowhead(draw, (x2 - (20 if not reverse else -20), y2), end)
+        # Draw arrowhead at end (always)
+        if len(waypoints) >= 2:
+            from_pt = waypoints[-2]
+            to_pt = waypoints[-1]
+            self._draw_arrowhead(draw, from_pt, to_pt)
 
-    def _draw_vertical_arrow(
-        self,
-        draw: ImageDraw.Draw,
-        start: Tuple[int, int],
-        end: Tuple[int, int],
-        line_width: int,
-        reverse: bool = False,
-    ):
-        """Draw an arrow with vertical-first routing."""
-        x1, y1 = start
-        x2, y2 = end
-
-        if abs(x2 - x1) < 5:
-            # Nearly vertical - draw straight line
-            draw.line([start, end], fill=self.line_color, width=line_width)
-        else:
-            # L-shaped routing: vertical first, then horizontal
-            mid_y = (y1 + y2) // 2
-            points = [(x1, y1), (x1, mid_y), (x2, mid_y), (x2, y2)]
-            for i in range(len(points) - 1):
-                draw.line(
-                    [points[i], points[i + 1]],
-                    fill=self.line_color,
-                    width=line_width,
-                )
-
-        # Draw arrowhead
-        self._draw_arrowhead(draw, (x2, y2 - (20 if not reverse else -20)), end)
+        # Draw arrowhead at start if bidirectional
+        if route.is_bidirectional and len(waypoints) >= 2:
+            from_pt = waypoints[1]
+            to_pt = waypoints[0]
+            self._draw_arrowhead(draw, from_pt, to_pt)
 
     def _draw_arrowhead(
         self,

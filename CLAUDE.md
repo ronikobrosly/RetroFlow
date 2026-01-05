@@ -25,7 +25,7 @@ At the same time, we optimize for maintainability over cleverness. When in doubt
 Also use the python `uv` tool and its associated virtual environment for running tests and project code.
 
 Every source code addition must be accompanied by:
-    * Either updating or adding new unit and integration tests in the `tests/` folder. Ensure that test coverage is > 95% at any time.
+    * Either updating or adding new unit and integration tests in the `tests/` folder. Ensure that test coverage is > 95% at any time. You **must** ensure that test coverage is above 95% after you make any changes.
     * Linting and formatting with the `ruff` package
     * Updating both the `README.md` and `CLAUDE.md` file. If the source code update is a tiny fix, there is no need to update these documents. Generally, update the documents if a user-facing change has been made. 
 
