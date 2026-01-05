@@ -113,7 +113,7 @@ retroflow/
 ├── codecov.yml              # Coverage threshold config (95%)
 ├── pyproject.toml           # Package metadata and dependencies
 ├── README.md                # User documentation
-└── CLAUDE.md                # Developer/agent guidance (this file)
+└── CLAUDE.md                # Developer/agent guidance (this current file)
 ```
 
 ### Key Source Files
