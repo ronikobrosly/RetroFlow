@@ -6,8 +6,23 @@ on:
       - 'v*' # Triggers when you push a tag like v1.0.2
 
 jobs:
+  test:
+    name: Test with coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Run tests with 95% coverage requirement
+        run: uv run pytest --cov=retroflow --cov-fail-under=95
+
   build-n-publish:
     name: Build and publish to PyPI
+    needs: test
     runs-on: ubuntu-latest
     # This environment name MUST match what you set on PyPI later
     environment: pypi

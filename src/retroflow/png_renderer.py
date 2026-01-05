@@ -246,18 +246,6 @@ class PNGRenderer:
             canvas_height = y_offset + self.margin * self.scale
         else:
             # Original vertical flow
-            columns = {}
-            for node, (layer_x, layer_y) in layout.positions.items():
-                if layer_x not in columns:
-                    columns[layer_x] = []
-                columns[layer_x].append(node)
-                w, h = box_dimensions[node]
-                if layer_x not in columns:
-                    columns[layer_x] = w
-                else:
-                    columns[layer_x] = max(columns.get(layer_x, 0), w)
-
-            # Recalculate properly
             col_widths = {}
             for node, (layer_x, layer_y) in layout.positions.items():
                 w, h = box_dimensions[node]

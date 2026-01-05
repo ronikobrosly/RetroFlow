@@ -20,6 +20,45 @@ A Python library for generating beautiful ASCII and PNG flowcharts from simple t
 [![PyPI version](https://badge.fury.io/py/retroflow.svg)](https://badge.fury.io/py/retroflow)
 [![Python Versions](https://img.shields.io/pypi/pyversions/retroflow.svg)](https://pypi.org/project/retroflow/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/ronikobrosly/retroflow/branch/main/graph/badge.svg)](https://codecov.io/gh/ronikobrosly/retroflow)
+
+
+## Overview 
+
+This is a project to help engineers, researchers, project managers, and others create beautiful, retro-looking ASCII flow diagrams. ASCII diagrams are pretty, and harken back to the mid-20th century technical documentation. They also have real advantages:
+
+1) They work wonderfully in the age of agentic AI, which can easily read and parse these small representations.
+2) ASCII diagrams can live inline with: PRs, Markdown files, Slack threads, etc.
+3) ASCII diagrams optimize for thinking speed, not presentation quality. It encourages iteration and deletion instead of premature refinement.
+4) Minimalist diagrams reduce visual noise (although they do still look retro and pretty)
+5) They're tool agnostic and can be rendered anywhere
+
+
+
+```
+    ┌─────────┐
+    │  START  │░
+    └─────────┘░
+     ░░░░░░░░░░░
+         │
+         ▼
+    ┌─────────┐
+    │ PROCESS │░
+    └─────────┘░
+     ░░░░░░░░░░░
+         │
+         ▼
+    ┌─────────┐
+    │DECISION │░
+    └─────────┘░
+     ░░░░░░░░░░░
+         │
+         ▼
+    ┌─────────┐
+    │   END   │░
+    └─────────┘░
+     ░░░░░░░░░░░
+```
 
 ## Installation
 
@@ -51,7 +90,7 @@ flowchart = generator.generate("""
 print(flowchart)
 ```
 
-Output:
+
 ```
     ┌─────────┐
     │  START  │░
@@ -310,4 +349,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are 100% welcome! Please feel free to submit a PR.
