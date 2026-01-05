@@ -1,4 +1,4 @@
-# CLAUDE.md - Development Guidance
+# CLAUDE.md - Development Guidance and Context
 
 ## Project Overview
 
