@@ -4,10 +4,11 @@ PNG Renderer module for flowchart generator.
 Renders flowcharts as high-resolution PNG images with professional styling.
 """
 
-from typing import Dict, List, Tuple, Optional
-from PIL import Image, ImageDraw, ImageFont
-import os
 import math
+import os
+from typing import Tuple
+
+from PIL import Image, ImageDraw, ImageFont
 
 
 class PNGRenderer:
@@ -22,6 +23,7 @@ class PNGRenderer:
         vertical_spacing: int = 40,
         shadow_offset: int = 5,
         font_size: int = 11,
+        font_path: str | None = None,  # Custom font path
         scale: int = 2,  # For high-resolution output
         margin: int = 50,
         horizontal_flow: bool = True,  # Flow left-to-right instead of top-to-bottom
@@ -33,6 +35,7 @@ class PNGRenderer:
         self.vertical_spacing = vertical_spacing
         self.shadow_offset = shadow_offset
         self.font_size = font_size
+        self.font_path = font_path
         self.scale = scale
         self.margin = margin
         self.horizontal_flow = horizontal_flow
@@ -49,11 +52,22 @@ class PNGRenderer:
         self.font = None
 
     def _get_font(self) -> ImageFont.FreeTypeFont:
-        """Get a monospace font for rendering text."""
+        """Get a font for rendering text."""
         if self.font is not None:
             return self.font
 
-        # Try to load a monospace font
+        font_size = self.font_size * self.scale
+
+        # Use custom font if provided
+        if self.font_path:
+            if os.path.exists(self.font_path):
+                try:
+                    self.font = ImageFont.truetype(self.font_path, font_size)
+                    return self.font
+                except Exception:
+                    pass  # Fall through to default fonts
+
+        # Try to load a monospace font from system
         font_options = [
             "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
@@ -62,10 +76,10 @@ class PNGRenderer:
             "/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf",
         ]
 
-        for font_path in font_options:
-            if os.path.exists(font_path):
+        for path in font_options:
+            if os.path.exists(path):
                 try:
-                    self.font = ImageFont.truetype(font_path, self.font_size * self.scale)
+                    self.font = ImageFont.truetype(path, font_size)
                     return self.font
                 except Exception:
                     continue
@@ -80,10 +94,12 @@ class PNGRenderer:
         bbox = draw.textbbox((0, 0), text, font=font)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    def _calculate_box_dimensions(self, node: str, draw: ImageDraw.Draw) -> Tuple[int, int]:
+    def _calculate_box_dimensions(
+        self, node: str, draw: ImageDraw.Draw
+    ) -> Tuple[int, int]:
         """Calculate box dimensions based on text content."""
         # Handle multi-line labels
-        lines = node.upper().split('\n')
+        lines = node.upper().split("\n")
         max_width = 0
         total_height = 0
         line_spacing = 4 * self.scale
@@ -99,12 +115,15 @@ class PNGRenderer:
                 total_height += line_spacing
 
         # Add padding
-        width = max(self.box_min_width * self.scale, max_width + self.box_padding * 2 * self.scale)
-        height = max(self.box_height * self.scale, total_height + self.box_padding * 2 * self.scale)
+        padding = self.box_padding * 2 * self.scale
+        width = max(self.box_min_width * self.scale, max_width + padding)
+        height = max(self.box_height * self.scale, total_height + padding)
 
         return width, height
 
-    def _draw_hatched_shadow(self, draw: ImageDraw.Draw, x: int, y: int, w: int, h: int):
+    def _draw_hatched_shadow(
+        self, draw: ImageDraw.Draw, x: int, y: int, w: int, h: int
+    ):
         """Draw a shadow effect using a checkerboard pattern (like ▒ character)."""
         s = self.shadow_offset * self.scale
 
@@ -121,7 +140,7 @@ class PNGRenderer:
                     if (row + col) % 2 == 0:
                         draw.rectangle(
                             [px, py, px + pixel_size - 1, py + pixel_size - 1],
-                            fill=self.shadow_color
+                            fill=self.shadow_color,
                         )
                     col += 1
                 row += 1
@@ -145,7 +164,7 @@ class PNGRenderer:
             Path to the saved PNG file
         """
         # Create a temporary image to measure text
-        temp_img = Image.new('RGB', (100, 100), self.bg_color)
+        temp_img = Image.new("RGB", (100, 100), self.bg_color)
         temp_draw = ImageDraw.Draw(temp_img)
 
         # Calculate box dimensions for each node
@@ -158,7 +177,7 @@ class PNGRenderer:
 
         if layout_width == 0 or layout_height == 0:
             # Create a small placeholder image
-            img = Image.new('RGB', (200, 100), self.bg_color)
+            img = Image.new("RGB", (200, 100), self.bg_color)
             img.save(output_path)
             return output_path
 
@@ -275,7 +294,7 @@ class PNGRenderer:
             canvas_height = y_offset + self.margin * self.scale
 
         # Create the image
-        img = Image.new('RGB', (canvas_width, canvas_height), self.bg_color)
+        img = Image.new("RGB", (canvas_width, canvas_height), self.bg_color)
         draw = ImageDraw.Draw(img)
 
         # Draw shadows first
@@ -290,11 +309,13 @@ class PNGRenderer:
             self._draw_box(draw, x, y, w, h, node)
 
         # Save the image
-        img.save(output_path, 'PNG', dpi=(300, 300))
+        img.save(output_path, "PNG", dpi=(300, 300))
 
         return output_path
 
-    def _draw_box(self, draw: ImageDraw.Draw, x: int, y: int, w: int, h: int, label: str):
+    def _draw_box(
+        self, draw: ImageDraw.Draw, x: int, y: int, w: int, h: int, label: str
+    ):
         """Draw a box with border."""
         line_width = max(1, self.scale)
 
@@ -303,13 +324,13 @@ class PNGRenderer:
             [x, y, x + w, y + h],
             fill=self.box_fill,
             outline=self.box_outline,
-            width=line_width
+            width=line_width,
         )
 
         # Draw text (centered, uppercase)
         font = self._get_font()
         text = label.upper()
-        lines = text.split('\n')
+        lines = text.split("\n")
         line_spacing = 4 * self.scale
 
         # Calculate total text height
@@ -362,7 +383,9 @@ class PNGRenderer:
                     # Target is to the left - connect left side to right side
                     start = (src_x, src_cy)
                     end = (tgt_x + tgt_w, tgt_cy)
-                    self._draw_horizontal_arrow(draw, start, end, line_width, reverse=True)
+                    self._draw_horizontal_arrow(
+                        draw, start, end, line_width, reverse=True
+                    )
                 elif tgt_cy > src_cy:
                     # Target is below
                     start = (src_cx, src_y + src_h)
@@ -372,7 +395,9 @@ class PNGRenderer:
                     # Target is above
                     start = (src_cx, src_y)
                     end = (tgt_cx, tgt_y + tgt_h)
-                    self._draw_vertical_arrow(draw, start, end, line_width, reverse=True)
+                    self._draw_vertical_arrow(
+                        draw, start, end, line_width, reverse=True
+                    )
             else:
                 # Vertical flow
                 if tgt_cy > src_cy + src_h // 2:
@@ -382,7 +407,9 @@ class PNGRenderer:
                 elif tgt_cy < src_cy - src_h // 2:
                     start = (src_cx, src_y)
                     end = (tgt_cx, tgt_y + tgt_h)
-                    self._draw_vertical_arrow(draw, start, end, line_width, reverse=True)
+                    self._draw_vertical_arrow(
+                        draw, start, end, line_width, reverse=True
+                    )
                 elif tgt_cx > src_cx:
                     start = (src_x + src_w, src_cy)
                     end = (tgt_x, tgt_cy)
@@ -390,10 +417,18 @@ class PNGRenderer:
                 else:
                     start = (src_x, src_cy)
                     end = (tgt_x + tgt_w, tgt_cy)
-                    self._draw_horizontal_arrow(draw, start, end, line_width, reverse=True)
+                    self._draw_horizontal_arrow(
+                        draw, start, end, line_width, reverse=True
+                    )
 
-    def _draw_horizontal_arrow(self, draw: ImageDraw.Draw, start: Tuple[int, int],
-                               end: Tuple[int, int], line_width: int, reverse: bool = False):
+    def _draw_horizontal_arrow(
+        self,
+        draw: ImageDraw.Draw,
+        start: Tuple[int, int],
+        end: Tuple[int, int],
+        line_width: int,
+        reverse: bool = False,
+    ):
         """Draw an arrow with horizontal-first routing."""
         x1, y1 = start
         x2, y2 = end
@@ -406,13 +441,23 @@ class PNGRenderer:
             mid_x = (x1 + x2) // 2
             points = [(x1, y1), (mid_x, y1), (mid_x, y2), (x2, y2)]
             for i in range(len(points) - 1):
-                draw.line([points[i], points[i + 1]], fill=self.line_color, width=line_width)
+                draw.line(
+                    [points[i], points[i + 1]],
+                    fill=self.line_color,
+                    width=line_width,
+                )
 
         # Draw arrowhead
         self._draw_arrowhead(draw, (x2 - (20 if not reverse else -20), y2), end)
 
-    def _draw_vertical_arrow(self, draw: ImageDraw.Draw, start: Tuple[int, int],
-                             end: Tuple[int, int], line_width: int, reverse: bool = False):
+    def _draw_vertical_arrow(
+        self,
+        draw: ImageDraw.Draw,
+        start: Tuple[int, int],
+        end: Tuple[int, int],
+        line_width: int,
+        reverse: bool = False,
+    ):
         """Draw an arrow with vertical-first routing."""
         x1, y1 = start
         x2, y2 = end
@@ -425,13 +470,21 @@ class PNGRenderer:
             mid_y = (y1 + y2) // 2
             points = [(x1, y1), (x1, mid_y), (x2, mid_y), (x2, y2)]
             for i in range(len(points) - 1):
-                draw.line([points[i], points[i + 1]], fill=self.line_color, width=line_width)
+                draw.line(
+                    [points[i], points[i + 1]],
+                    fill=self.line_color,
+                    width=line_width,
+                )
 
         # Draw arrowhead
         self._draw_arrowhead(draw, (x2, y2 - (20 if not reverse else -20)), end)
 
-    def _draw_arrowhead(self, draw: ImageDraw.Draw, from_point: Tuple[int, int],
-                        to_point: Tuple[int, int]):
+    def _draw_arrowhead(
+        self,
+        draw: ImageDraw.Draw,
+        from_point: Tuple[int, int],
+        to_point: Tuple[int, int],
+    ):
         """Draw an arrowhead at the end of a line."""
         x1, y1 = from_point
         x2, y2 = to_point
