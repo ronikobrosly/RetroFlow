@@ -6,11 +6,11 @@ Renders flowcharts as high-resolution PNG images with professional styling.
 
 import math
 import os
-from typing import Dict, List, Tuple
+from typing import Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .edge_routing import create_router, EdgeRoute
+from .edge_routing import EdgeRoute, create_router
 
 
 class PNGRenderer:

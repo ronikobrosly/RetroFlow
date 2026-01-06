@@ -20,41 +20,41 @@ from typing import Dict, List, Optional, Set, Tuple
 # --- Distance/Spacing Parameters (in pixels) ---
 
 # Minimum distance from box edge when routing alongside
-# Higher values keep arrows further from boxes 
-MIN_BOX_CLEARANCE = 25 # 25 default
+# Higher values keep arrows further from boxes
+MIN_BOX_CLEARANCE = 50  # 25 default
 
 # Minimum segment length between a turn and a box connection
 # Higher values give more room for arrowheads
-MIN_SEGMENT_LENGTH = 30 # 30 default
+MIN_SEGMENT_LENGTH = 50  # 30 default
 
 # Minimum separation between parallel edges
 # Higher values spread out parallel arrows more
-MIN_EDGE_SEPARATION = 15 # 15 default
+MIN_EDGE_SEPARATION = 30  # 15 default
 
 # Spacing for routing channels between boxes
-CHANNEL_SPACING = 8 # 4 default
+CHANNEL_SPACING = 20  # 4 default
 
 # Margin around boxes when marking them in the occupancy grid
-BOX_MARGIN = 3 # 2 default
+BOX_MARGIN = 10  # 2 default
 
 # --- Scoring Penalties for Side Selection ---
 # Lower scores are preferred when choosing which sides to connect
 
 # Penalty for routing against the natural flow direction
 # (e.g., going left when target is to the right)
-DIRECTION_PENALTY = 500 # 500 default
+DIRECTION_PENALTY = 50  # 500 default
 
 # Penalty when the path would go through a box
-OBSTRUCTION_PENALTY = 5000 # 2000 default
+OBSTRUCTION_PENALTY = 100000  # 2000 default
 
 # Penalty for paths requiring more turns (L-shaped vs straight)
-TURN_PENALTY = 100 # 300 default
+TURN_PENALTY = 50  # 300 default
 
 # Multiplier for already-used ports (spreads edges across ports)
-PORT_USAGE_PENALTY = 1000 # 200 default
+PORT_USAGE_PENALTY = 10000  # 200 default
 
 # Penalty for non-center ports (prefers middle ports when equal)
-NON_CENTER_PORT_PENALTY = 10 # 100 default
+NON_CENTER_PORT_PENALTY = 1  # 100 default
 
 # =============================================================================
 
