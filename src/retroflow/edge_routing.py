@@ -48,13 +48,28 @@ DIRECTION_PENALTY = 50  # 500 default
 OBSTRUCTION_PENALTY = 100000  # 2000 default
 
 # Penalty for paths requiring more turns (L-shaped vs straight)
-TURN_PENALTY = 50  # 300 default
+TURN_PENALTY = 10  # 300 default
 
 # Multiplier for already-used ports (spreads edges across ports)
-PORT_USAGE_PENALTY = 10000  # 200 default
+PORT_USAGE_PENALTY = 100000  # 200 default
 
 # Penalty for non-center ports (prefers middle ports when equal)
 NON_CENTER_PORT_PENALTY = 1  # 100 default
+
+# --- Layout Scoring Weights (used by score_layout and refine_routes) ---
+# These control the global optimization scoring
+
+# Weight for total wire length (lower = less penalty for long wires)
+WIRE_LENGTH_WEIGHT = 0.005
+
+# Penalty per edge crossing (higher = stronger avoidance of crossings)
+CROSSING_PENALTY = 200
+
+# Penalty multiplier for edge congestion (parallel edges too close)
+CONGESTION_PENALTY = 100
+
+# Multiplier for proximity violations (edges too close to boxes)
+PROXIMITY_PENALTY_MULTIPLIER = 2
 
 # =============================================================================
 
@@ -325,28 +340,36 @@ class PortManager:
         """
         Get the best available port on a side.
 
+        Enforces strict one-edge-per-port rule: returns None if all ports
+        on this side are already in use.
+
         Args:
             node: Node name
             side: Side of the box
             target_coord: Target x (for top/bottom) or y (for left/right)
             is_horizontal_side: True for top/bottom sides
+
+        Returns:
+            Available Port, or None if all ports on this side are taken
         """
         ports = self.ports.get(node, {}).get(side, [])
         if not ports:
             return None
 
-        used_positions = self.port_usage[node][side]
+        # Filter to only unused ports (strict one-edge-per-port rule)
+        available_ports = [p for p in ports if not p.in_use]
+        if not available_ports:
+            return None  # All ports on this side are taken
 
-        # Score ports: prefer unused, then closest to target
+        # Score available ports: prefer closest to target, then center
         scored_ports = []
-        for port in ports:
+        for port in available_ports:
             coord = port.x if is_horizontal_side else port.y
             dist = abs(coord - target_coord)
-            usage_penalty = 10000 if port.position in used_positions else 0
             # Small penalty for non-middle ports to prefer center when equal
             is_center = port.position == PortPosition.MIDDLE
             center_penalty = 0 if is_center else NON_CENTER_PORT_PENALTY
-            score = dist + usage_penalty + center_penalty
+            score = dist + center_penalty
             scored_ports.append((score, port))
 
         scored_ports.sort(key=lambda x: x[0])
@@ -359,30 +382,70 @@ class PortManager:
         return best_port
 
     def get_next_available_port(self, node: str, side: str) -> Optional[Port]:
-        """Get the next unused port on a side, cycling through positions."""
+        """
+        Get the next unused port on a side, cycling through positions.
+
+        Enforces strict one-edge-per-port rule: returns None if all ports
+        on this side are already in use.
+        """
         ports = self.ports.get(node, {}).get(side, [])
         if not ports:
             return None
 
         used_positions = self.port_usage[node][side]
 
-        # Prefer unused ports
+        # Only return unused ports (strict one-edge-per-port rule)
         for port in ports:
             if port.position not in used_positions:
                 self.port_usage[node][side].append(port.position)
                 port.in_use = True
                 return port
 
-        # All used, return middle port
-        for port in ports:
-            if port.position == PortPosition.MIDDLE:
-                return port
-
-        return ports[0]
+        # All ports on this side are taken - return None to force different side
+        return None
 
     def count_used_ports(self, node: str, side: str) -> int:
         """Count how many ports are used on a side."""
         return len(self.port_usage[node][side])
+
+    def validate_no_duplicate_ports(self) -> Tuple[bool, List[str]]:
+        """
+        Validate that no port is used more than once.
+
+        Returns:
+            Tuple of (is_valid, list of error messages)
+        """
+        errors = []
+
+        for node, sides in self.ports.items():
+            for side, ports in sides.items():
+                used_positions = self.port_usage[node][side]
+
+                # Check for duplicate positions in usage tracking
+                if len(used_positions) != len(set(used_positions)):
+                    duplicates = [
+                        p for p in used_positions if used_positions.count(p) > 1
+                    ]
+                    errors.append(
+                        f"Duplicate port positions on {node}.{side}: {duplicates}"
+                    )
+
+                # Check that in_use flag matches usage tracking
+                for port in ports:
+                    is_tracked = port.position in used_positions
+                    if port.in_use != is_tracked:
+                        errors.append(
+                            f"Port state mismatch on {node}.{side}.{port.position}: "
+                            f"in_use={port.in_use}, tracked={is_tracked}"
+                        )
+
+                # Check that we don't exceed 3 ports per side
+                if len(set(used_positions)) > 3:
+                    errors.append(
+                        f"More than 3 ports used on {node}.{side}: {used_positions}"
+                    )
+
+        return (len(errors) == 0, errors)
 
 
 class ChannelManager:
@@ -638,6 +701,9 @@ class OrthogonalRouter:
         """
         Route an edge from source to target.
 
+        Tries multiple side combinations until it finds one with available ports.
+        Enforces strict one-edge-per-port rule.
+
         Args:
             source: Source node name
             target: Target node name
@@ -652,55 +718,70 @@ class OrthogonalRouter:
         src_bounds = self.box_bounds[source]
         tgt_bounds = self.box_bounds[target]
 
-        # Get best side combination
+        # Get all side combinations sorted by preference
         side_options = self._get_all_side_options(source, target)
-        src_side, tgt_side, _ = side_options[0]
 
-        # Get appropriate ports
-        is_src_horizontal = src_side in ("top", "bottom")
-        is_tgt_horizontal = tgt_side in ("top", "bottom")
+        # Try each side combination until we find one with available ports
+        for src_side, tgt_side, _ in side_options:
+            is_src_horizontal = src_side in ("top", "bottom")
+            is_tgt_horizontal = tgt_side in ("top", "bottom")
 
-        src_port = self.port_manager.get_available_port(
-            source,
-            src_side,
-            tgt_bounds.center_x if is_src_horizontal else tgt_bounds.center_y,
-            is_src_horizontal,
-        )
-        tgt_port = self.port_manager.get_available_port(
-            target,
-            tgt_side,
-            src_bounds.center_x if is_tgt_horizontal else src_bounds.center_y,
-            is_tgt_horizontal,
-        )
+            # Try to get available ports (strict one-edge-per-port)
+            src_port = self.port_manager.get_available_port(
+                source,
+                src_side,
+                tgt_bounds.center_x if is_src_horizontal else tgt_bounds.center_y,
+                is_src_horizontal,
+            )
+            if not src_port:
+                continue  # No available port on this source side, try next
 
-        if not src_port or not tgt_port:
-            return None
+            tgt_port = self.port_manager.get_available_port(
+                target,
+                tgt_side,
+                src_bounds.center_x if is_tgt_horizontal else src_bounds.center_y,
+                is_tgt_horizontal,
+            )
+            if not tgt_port:
+                # Release the source port we just claimed
+                self._release_port(src_port)
+                continue  # No available port on this target side, try next
 
-        # Route the path
-        waypoints = self._route_path(
-            src_port.x,
-            src_port.y,
-            tgt_port.x,
-            tgt_port.y,
-            src_side,
-            tgt_side,
-            source,
-            target,
-        )
+            # Found valid ports - route the path
+            waypoints = self._route_path(
+                src_port.x,
+                src_port.y,
+                tgt_port.x,
+                tgt_port.y,
+                src_side,
+                tgt_side,
+                source,
+                target,
+            )
 
-        # Mark the route in the grid
-        self._mark_route(waypoints)
+            # Mark the route in the grid
+            self._mark_route(waypoints)
 
-        route = EdgeRoute(
-            source=source,
-            target=target,
-            source_port=src_port,
-            target_port=tgt_port,
-            waypoints=waypoints,
-            is_bidirectional=is_bidirectional,
-        )
-        self.routes.append(route)
-        return route
+            route = EdgeRoute(
+                source=source,
+                target=target,
+                source_port=src_port,
+                target_port=tgt_port,
+                waypoints=waypoints,
+                is_bidirectional=is_bidirectional,
+            )
+            self.routes.append(route)
+            return route
+
+        # No valid side combination found with available ports
+        return None
+
+    def _release_port(self, port: Port):
+        """Release a port that was claimed but not used."""
+        port.in_use = False
+        usage_list = self.port_manager.port_usage[port.node][port.side]
+        if port.position in usage_list:
+            usage_list.remove(port.position)
 
     def _route_path(
         self,
@@ -787,23 +868,64 @@ class OrthogonalRouter:
 
         if start_horizontal and end_horizontal:
             # Both horizontal: need vertical segment in between
-            # Find a clear vertical channel
-            mid_x = self._find_clear_vertical_x(
-                x1, x2, min(y1, y2), max(y1, y2), exclude_nodes
-            )
-            if y1 != y2 or x1 != mid_x:
-                waypoints.append((mid_x, y1))
-            if y1 != y2:
+            # But first check if y1 == y2 and that horizontal line is already used
+            if y1 == y2:
+                # Direct horizontal path - check if it overlaps existing edges
+                if self._horizontal_overlaps_existing(y1, min(x1, x2), max(x1, x2)):
+                    # Need to offset to avoid overlap - route around
+                    offset_y = self._find_clear_horizontal_y(
+                        y1 - MIN_EDGE_SEPARATION * 2,
+                        y1 + MIN_EDGE_SEPARATION * 2,
+                        min(x1, x2),
+                        max(x1, x2),
+                        exclude_nodes,
+                    )
+                    mid_x = (x1 + x2) // 2
+                    waypoints.append((mid_x, y1))
+                    waypoints.append((mid_x, offset_y))
+                    waypoints.append((x2, offset_y))
+                else:
+                    # No overlap, can use direct path (will be simplified)
+                    mid_x = self._find_clear_vertical_x(x1, x2, y1, y1, exclude_nodes)
+                    if x1 != mid_x:
+                        waypoints.append((mid_x, y1))
+            else:
+                mid_x = self._find_clear_vertical_x(
+                    x1, x2, min(y1, y2), max(y1, y2), exclude_nodes
+                )
+                if x1 != mid_x:
+                    waypoints.append((mid_x, y1))
                 waypoints.append((mid_x, y2))
 
         elif not start_horizontal and not end_horizontal:
             # Both vertical: need horizontal segment in between
-            mid_y = self._find_clear_horizontal_y(
-                y1, y2, min(x1, x2), max(x1, x2), exclude_nodes
-            )
-            if x1 != x2 or y1 != mid_y:
-                waypoints.append((x1, mid_y))
-            if x1 != x2:
+            # But first check if x1 == x2 and that vertical line is already used
+            if x1 == x2:
+                # Direct vertical path - check if it overlaps existing edges
+                if self._vertical_overlaps_existing(x1, min(y1, y2), max(y1, y2)):
+                    # Need to offset to avoid overlap - route around
+                    offset_x = self._find_clear_vertical_x(
+                        x1 - MIN_EDGE_SEPARATION * 2,
+                        x1 + MIN_EDGE_SEPARATION * 2,
+                        min(y1, y2),
+                        max(y1, y2),
+                        exclude_nodes,
+                    )
+                    mid_y = (y1 + y2) // 2
+                    waypoints.append((x1, mid_y))
+                    waypoints.append((offset_x, mid_y))
+                    waypoints.append((offset_x, y2))
+                else:
+                    # No overlap, can use direct path (will be simplified)
+                    mid_y = self._find_clear_horizontal_y(y1, y2, x1, x1, exclude_nodes)
+                    if y1 != mid_y:
+                        waypoints.append((x1, mid_y))
+            else:
+                mid_y = self._find_clear_horizontal_y(
+                    y1, y2, min(x1, x2), max(x1, x2), exclude_nodes
+                )
+                if y1 != mid_y:
+                    waypoints.append((x1, mid_y))
                 waypoints.append((x2, mid_y))
 
         elif start_horizontal and not end_horizontal:
@@ -987,6 +1109,422 @@ class OrthogonalRouter:
 
         return final
 
+    def remove_route(self, route: EdgeRoute) -> bool:
+        """
+        Remove a route and undo its state changes.
+
+        Args:
+            route: The EdgeRoute to remove
+
+        Returns:
+            True if route was removed, False if not found
+        """
+        if route not in self.routes:
+            return False
+
+        # Remove from routes list
+        self.routes.remove(route)
+
+        # Undo port usage tracking
+        src_port = route.source_port
+        tgt_port = route.target_port
+
+        src_usage = self.port_manager.port_usage[src_port.node][src_port.side]
+        if src_port.position in src_usage:
+            src_usage.remove(src_port.position)
+            src_port.in_use = False
+
+        tgt_usage = self.port_manager.port_usage[tgt_port.node][tgt_port.side]
+        if tgt_port.position in tgt_usage:
+            tgt_usage.remove(tgt_port.position)
+            tgt_port.in_use = False
+
+        # Undo exit/entry counts
+        exit_key = (route.source, src_port.side)
+        if self.exit_counts[exit_key] > 0:
+            self.exit_counts[exit_key] -= 1
+
+        entry_key = (route.target, tgt_port.side)
+        if self.entry_counts[entry_key] > 0:
+            self.entry_counts[entry_key] -= 1
+
+        # Remove edge segments from tracking lists and grid
+        waypoints = route.waypoints
+        for i in range(len(waypoints) - 1):
+            x1, y1 = waypoints[i]
+            x2, y2 = waypoints[i + 1]
+
+            if x1 == x2:  # Vertical segment
+                seg = (x1, min(y1, y2), max(y1, y2))
+                if seg in self.used_vertical_segments:
+                    self.used_vertical_segments.remove(seg)
+            elif y1 == y2:  # Horizontal segment
+                seg = (y1, min(x1, x2), max(x1, x2))
+                if seg in self.used_horizontal_segments:
+                    self.used_horizontal_segments.remove(seg)
+
+            # Clear edge cells from grid (but not box cells)
+            self._clear_edge_segment(x1, y1, x2, y2)
+
+        return True
+
+    def _clear_edge_segment(self, x1: int, y1: int, x2: int, y2: int):
+        """Clear edge cells from the grid for a segment."""
+        if x1 == x2:  # Vertical line
+            for y in range(min(y1, y2), max(y1, y2) + 1):
+                cell = (x1, y)
+                cell_type = self.grid.cells.get(cell)
+                if cell_type in (CellType.VERTICAL_EDGE, CellType.HORIZONTAL_EDGE):
+                    del self.grid.cells[cell]
+                elif cell_type == CellType.JUNCTION:
+                    # Downgrade junction to the other edge type
+                    self.grid.cells[cell] = CellType.HORIZONTAL_EDGE
+        elif y1 == y2:  # Horizontal line
+            for x in range(min(x1, x2), max(x1, x2) + 1):
+                cell = (x, y1)
+                cell_type = self.grid.cells.get(cell)
+                if cell_type in (CellType.HORIZONTAL_EDGE, CellType.VERTICAL_EDGE):
+                    del self.grid.cells[cell]
+                elif cell_type == CellType.JUNCTION:
+                    self.grid.cells[cell] = CellType.VERTICAL_EDGE
+
+    def score_layout(self) -> float:
+        """
+        Calculate a global quality score for the current layout.
+
+        Lower scores are better. Considers:
+        - Total wire length
+        - Number of bends/turns
+        - Edge crossings
+        - Proximity to boxes
+
+        Returns:
+            Float score (lower is better)
+        """
+        if not self.routes:
+            return 0.0
+
+        score = 0.0
+
+        for route in self.routes:
+            # Wire length penalty
+            wire_length = self._calculate_wire_length(route.waypoints)
+            score += wire_length * WIRE_LENGTH_WEIGHT
+
+            # Bend penalty - count turns in the path
+            num_bends = self._count_bends(route.waypoints)
+            score += num_bends * TURN_PENALTY
+
+            # Proximity to boxes penalty
+            proximity_penalty = self._calculate_proximity_penalty(
+                route.waypoints, route.source, route.target
+            )
+            score += proximity_penalty
+
+        # Edge crossing penalty
+        crossing_count = self._count_edge_crossings()
+        score += crossing_count * CROSSING_PENALTY
+
+        # Edge overlap/congestion penalty
+        congestion = self._calculate_congestion()
+        score += congestion * CONGESTION_PENALTY
+
+        return score
+
+    def _calculate_wire_length(self, waypoints: List[Tuple[int, int]]) -> float:
+        """Calculate total wire length for a path."""
+        length = 0.0
+        for i in range(len(waypoints) - 1):
+            x1, y1 = waypoints[i]
+            x2, y2 = waypoints[i + 1]
+            length += abs(x2 - x1) + abs(y2 - y1)
+        return length
+
+    def _count_bends(self, waypoints: List[Tuple[int, int]]) -> int:
+        """Count the number of bends/turns in a path."""
+        if len(waypoints) < 3:
+            return 0
+
+        bends = 0
+        for i in range(1, len(waypoints) - 1):
+            prev = waypoints[i - 1]
+            curr = waypoints[i]
+            next_pt = waypoints[i + 1]
+
+            # Check if direction changes
+            prev_horizontal = prev[1] == curr[1]
+            next_horizontal = curr[1] == next_pt[1]
+
+            if prev_horizontal != next_horizontal:
+                bends += 1
+
+        return bends
+
+    def _calculate_proximity_penalty(
+        self,
+        waypoints: List[Tuple[int, int]],
+        source: str,
+        target: str,
+    ) -> float:
+        """Calculate penalty for edges passing too close to boxes."""
+        penalty = 0.0
+        exclude_nodes = {source, target}
+        clearance = MIN_BOX_CLEARANCE // 2  # Check for half-clearance violations
+
+        for i in range(len(waypoints) - 1):
+            x1, y1 = waypoints[i]
+            x2, y2 = waypoints[i + 1]
+
+            for node, bounds in self.box_bounds.items():
+                if node in exclude_nodes:
+                    continue
+
+                # Check proximity for vertical segments
+                if x1 == x2:
+                    dist_to_box = min(abs(x1 - bounds.x), abs(x1 - bounds.x2))
+                    if dist_to_box < clearance:
+                        # Check if y range overlaps with box
+                        y_min, y_max = min(y1, y2), max(y1, y2)
+                        if not (y_max < bounds.y or y_min > bounds.y2):
+                            penalty += (
+                                clearance - dist_to_box
+                            ) * PROXIMITY_PENALTY_MULTIPLIER
+
+                # Check proximity for horizontal segments
+                elif y1 == y2:
+                    dist_to_box = min(abs(y1 - bounds.y), abs(y1 - bounds.y2))
+                    if dist_to_box < clearance:
+                        x_min, x_max = min(x1, x2), max(x1, x2)
+                        if not (x_max < bounds.x or x_min > bounds.x2):
+                            penalty += (
+                                clearance - dist_to_box
+                            ) * PROXIMITY_PENALTY_MULTIPLIER
+
+        return penalty
+
+    def _count_edge_crossings(self) -> int:
+        """Count the number of edge crossings in the layout."""
+        crossings = 0
+
+        # Collect all segments
+        h_segments = []  # (y, x_min, x_max, route_idx)
+        v_segments = []  # (x, y_min, y_max, route_idx)
+
+        for route_idx, route in enumerate(self.routes):
+            waypoints = route.waypoints
+            for i in range(len(waypoints) - 1):
+                x1, y1 = waypoints[i]
+                x2, y2 = waypoints[i + 1]
+
+                if x1 == x2:  # Vertical
+                    v_segments.append((x1, min(y1, y2), max(y1, y2), route_idx))
+                elif y1 == y2:  # Horizontal
+                    h_segments.append((y1, min(x1, x2), max(x1, x2), route_idx))
+
+        # Check for crossings between horizontal and vertical segments
+        for h_y, h_x_min, h_x_max, h_idx in h_segments:
+            for v_x, v_y_min, v_y_max, v_idx in v_segments:
+                if h_idx == v_idx:
+                    continue  # Same route, not a crossing
+
+                # Check if they intersect
+                if h_x_min < v_x < h_x_max and v_y_min < h_y < v_y_max:
+                    crossings += 1
+
+        return crossings
+
+    def _calculate_congestion(self) -> float:
+        """Calculate congestion penalty for edges running close together."""
+        congestion = 0.0
+        sep = MIN_EDGE_SEPARATION
+
+        # Check vertical segment congestion
+        for i, (x1, y1_min, y1_max) in enumerate(self.used_vertical_segments):
+            for x2, y2_min, y2_max in self.used_vertical_segments[i + 1 :]:
+                if abs(x1 - x2) < sep:
+                    # Check y overlap
+                    overlap = min(y1_max, y2_max) - max(y1_min, y2_min)
+                    if overlap > 0:
+                        congestion += overlap * (sep - abs(x1 - x2)) / sep
+
+        # Check horizontal segment congestion
+        for i, (y1, x1_min, x1_max) in enumerate(self.used_horizontal_segments):
+            for y2, x2_min, x2_max in self.used_horizontal_segments[i + 1 :]:
+                if abs(y1 - y2) < sep:
+                    overlap = min(x1_max, x2_max) - max(x1_min, x2_min)
+                    if overlap > 0:
+                        congestion += overlap * (sep - abs(y1 - y2)) / sep
+
+        return congestion
+
+    def refine_routes(self, max_iterations: int = 10) -> Tuple[float, int]:
+        """
+        Iteratively refine routes to find a better global layout.
+
+        For each edge, tries alternative side combinations and keeps
+        improvements. Repeats until no improvement is found or max
+        iterations reached.
+
+        Args:
+            max_iterations: Maximum refinement passes over all edges
+
+        Returns:
+            Tuple of (final_score, iterations_performed)
+        """
+        if len(self.routes) < 2:
+            # Nothing to refine with 0 or 1 edges
+            return self.score_layout(), 0
+
+        best_score = self.score_layout()
+        iterations = 0
+
+        for iteration in range(max_iterations):
+            improved = False
+            iterations += 1
+
+            # Try to improve each route
+            for route_idx in range(len(self.routes)):
+                route = self.routes[route_idx]
+                source = route.source
+                target = route.target
+                is_bidirectional = route.is_bidirectional
+
+                # Get alternative side options (skip the current best which is index 0)
+                side_options = self._get_all_side_options(source, target)
+
+                # Current sides being used
+                current_src_side = route.source_port.side
+                current_tgt_side = route.target_port.side
+
+                # Try top alternative side combinations
+                for src_side, tgt_side, _ in side_options[:6]:  # Try top 6 alternatives
+                    if src_side == current_src_side and tgt_side == current_tgt_side:
+                        continue  # Skip current configuration
+
+                    # Remove current route
+                    self.remove_route(route)
+
+                    # Try new routing with specified sides
+                    new_route = self._route_edge_with_sides(
+                        source, target, src_side, tgt_side, is_bidirectional
+                    )
+
+                    if new_route:
+                        new_score = self.score_layout()
+
+                        if new_score < best_score:
+                            # Keep the improvement
+                            best_score = new_score
+                            route = new_route
+                            current_src_side = src_side
+                            current_tgt_side = tgt_side
+                            improved = True
+                        else:
+                            # Revert - remove new route and restore original
+                            self.remove_route(new_route)
+                            restored = self._route_edge_with_sides(
+                                source,
+                                target,
+                                current_src_side,
+                                current_tgt_side,
+                                is_bidirectional,
+                            )
+                            if restored:
+                                route = restored
+                    else:
+                        # Routing failed, restore original
+                        restored = self._route_edge_with_sides(
+                            source,
+                            target,
+                            current_src_side,
+                            current_tgt_side,
+                            is_bidirectional,
+                        )
+                        if restored:
+                            route = restored
+
+            if not improved:
+                break
+
+        return best_score, iterations
+
+    def _route_edge_with_sides(
+        self,
+        source: str,
+        target: str,
+        src_side: str,
+        tgt_side: str,
+        is_bidirectional: bool = False,
+    ) -> Optional[EdgeRoute]:
+        """
+        Route an edge using specific source and target sides.
+
+        Args:
+            source: Source node name
+            target: Target node name
+            src_side: Side of source box to use
+            tgt_side: Side of target box to use
+            is_bidirectional: Whether edge is bidirectional
+
+        Returns:
+            EdgeRoute if successful, None otherwise
+        """
+        if source not in self.box_bounds or target not in self.box_bounds:
+            return None
+
+        src_bounds = self.box_bounds[source]
+        tgt_bounds = self.box_bounds[target]
+
+        # Get appropriate ports for specified sides
+        is_src_horizontal = src_side in ("top", "bottom")
+        is_tgt_horizontal = tgt_side in ("top", "bottom")
+
+        src_port = self.port_manager.get_available_port(
+            source,
+            src_side,
+            tgt_bounds.center_x if is_src_horizontal else tgt_bounds.center_y,
+            is_src_horizontal,
+        )
+        if not src_port:
+            return None
+
+        tgt_port = self.port_manager.get_available_port(
+            target,
+            tgt_side,
+            src_bounds.center_x if is_tgt_horizontal else src_bounds.center_y,
+            is_tgt_horizontal,
+        )
+        if not tgt_port:
+            # Release the source port we claimed since routing failed
+            self._release_port(src_port)
+            return None
+
+        # Route the path
+        waypoints = self._route_path(
+            src_port.x,
+            src_port.y,
+            tgt_port.x,
+            tgt_port.y,
+            src_side,
+            tgt_side,
+            source,
+            target,
+        )
+
+        # Mark the route in the grid
+        self._mark_route(waypoints)
+
+        route = EdgeRoute(
+            source=source,
+            target=target,
+            source_port=src_port,
+            target_port=tgt_port,
+            waypoints=waypoints,
+            is_bidirectional=is_bidirectional,
+        )
+        self.routes.append(route)
+        return route
+
 
 def create_router(
     node_positions: Dict[str, Tuple[int, int, int, int]],
@@ -1031,3 +1569,44 @@ def create_router(
     router = OrthogonalRouter(grid, port_manager, box_bounds)
 
     return grid, port_manager, router
+
+
+def route_edges_with_refinement(
+    node_positions: Dict[str, Tuple[int, int, int, int]],
+    edges: List[Tuple[str, str, bool]],
+    refine: bool = True,
+    max_iterations: int = 10,
+) -> Tuple[List[EdgeRoute], float]:
+    """
+    Route all edges with optional iterative refinement.
+
+    This is a convenience function that:
+    1. Creates the routing infrastructure
+    2. Routes all edges using the greedy algorithm
+    3. Optionally refines routes to improve global layout quality
+
+    Args:
+        node_positions: Dict mapping node name to (x, y, width, height)
+        edges: List of (source, target, is_bidirectional) tuples
+        refine: Whether to run iterative refinement (default True)
+        max_iterations: Max refinement iterations (default 10)
+
+    Returns:
+        Tuple of (list of EdgeRoute objects, final layout score)
+
+    Example:
+        >>> positions = {"A": (0, 0, 100, 50), "B": (200, 0, 100, 50)}
+        >>> edges = [("A", "B", False)]
+        >>> routes, score = route_edges_with_refinement(positions, edges)
+    """
+    _, _, router = create_router(node_positions)
+
+    # Route all edges
+    for source, target, is_bidirectional in edges:
+        router.route_edge(source, target, is_bidirectional)
+
+    # Optionally refine
+    if refine and len(router.routes) >= 2:
+        router.refine_routes(max_iterations)
+
+    return router.routes, router.score_layout()

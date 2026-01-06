@@ -7,21 +7,17 @@ These tests verify that:
 3. Routing produces clean, readable diagrams
 """
 
-import pytest
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 from retroflow.edge_routing import (
     BoxBounds,
     EdgeRoute,
-    OrthogonalRouter,
-    OccupancyGrid,
-    PortManager,
     create_router,
 )
 
 
 def segments_from_waypoints(
-    waypoints: List[Tuple[int, int]]
+    waypoints: List[Tuple[int, int]],
 ) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
     """Extract line segments from waypoints."""
     segments = []
@@ -202,8 +198,7 @@ def validate_routing_quality(
 
     # Check for box intersections
     box_bounds = {
-        node: BoxBounds(x, y, w, h)
-        for node, (x, y, w, h) in node_positions.items()
+        node: BoxBounds(x, y, w, h) for node, (x, y, w, h) in node_positions.items()
     }
 
     box_intersections = []
@@ -305,7 +300,9 @@ class TestNoBoxIntersections:
         edges = [("A", "B")]
 
         box_intersections, _ = validate_routing_quality(node_positions, edges)
-        assert len(box_intersections) == 0, f"Box intersections found: {box_intersections}"
+        assert len(box_intersections) == 0, (
+            f"Box intersections found: {box_intersections}"
+        )
 
     def test_vertical_obstacle_avoidance(self):
         """Test that vertical routing avoids obstacles."""
@@ -317,7 +314,9 @@ class TestNoBoxIntersections:
         edges = [("A", "B")]
 
         box_intersections, _ = validate_routing_quality(node_positions, edges)
-        assert len(box_intersections) == 0, f"Box intersections found: {box_intersections}"
+        assert len(box_intersections) == 0, (
+            f"Box intersections found: {box_intersections}"
+        )
 
     def test_multiple_edges_no_intersection(self):
         """Test multiple edges don't pass through boxes."""
@@ -335,7 +334,9 @@ class TestNoBoxIntersections:
         ]
 
         box_intersections, _ = validate_routing_quality(node_positions, edges)
-        assert len(box_intersections) == 0, f"Box intersections found: {box_intersections}"
+        assert len(box_intersections) == 0, (
+            f"Box intersections found: {box_intersections}"
+        )
 
     def test_complex_graph_no_intersection(self):
         """Test complex graph doesn't have box intersections."""
@@ -358,7 +359,9 @@ class TestNoBoxIntersections:
         ]
 
         box_intersections, _ = validate_routing_quality(node_positions, edges)
-        assert len(box_intersections) == 0, f"Box intersections found: {box_intersections}"
+        assert len(box_intersections) == 0, (
+            f"Box intersections found: {box_intersections}"
+        )
 
 
 class TestNoOverlappingLines:

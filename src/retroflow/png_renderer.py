@@ -358,7 +358,8 @@ class PNGRenderer:
             if (target, source) in edge_set:
                 bidirectional.add((min(source, target), max(source, target)))
 
-        # Route all edges
+        # Route all edges first, collecting the routes
+        routes = []
         processed = set()
         for source, target, is_feedback in edges:
             # Check if this is a bidirectional edge
@@ -374,33 +375,52 @@ class PNGRenderer:
             # Route the edge
             route = router.route_edge(source, target, is_bidir)
             if route:
-                self._draw_routed_edge(draw, route, line_width)
+                routes.append(route)
 
-    def _draw_routed_edge(
+        # Draw all line segments first (so arrowheads are always on top)
+        for route in routes:
+            self._draw_route_lines(draw, route, line_width)
+
+        # Then draw all arrowheads
+        for route in routes:
+            self._draw_route_arrowheads(draw, route)
+
+    def _draw_route_lines(
         self, draw: ImageDraw.Draw, route: EdgeRoute, line_width: int
     ):
-        """Draw a routed edge with waypoints."""
+        """Draw only the line segments of a routed edge (no arrowheads)."""
         waypoints = route.waypoints
         if len(waypoints) < 2:
             return
 
-        # Draw the path segments
         for i in range(len(waypoints) - 1):
             p1 = waypoints[i]
             p2 = waypoints[i + 1]
             draw.line([p1, p2], fill=self.line_color, width=line_width)
 
+    def _draw_route_arrowheads(self, draw: ImageDraw.Draw, route: EdgeRoute):
+        """Draw only the arrowheads of a routed edge."""
+        waypoints = route.waypoints
+        if len(waypoints) < 2:
+            return
+
         # Draw arrowhead at end (always)
-        if len(waypoints) >= 2:
-            from_pt = waypoints[-2]
-            to_pt = waypoints[-1]
-            self._draw_arrowhead(draw, from_pt, to_pt)
+        from_pt = waypoints[-2]
+        to_pt = waypoints[-1]
+        self._draw_arrowhead(draw, from_pt, to_pt)
 
         # Draw arrowhead at start if bidirectional
-        if route.is_bidirectional and len(waypoints) >= 2:
+        if route.is_bidirectional:
             from_pt = waypoints[1]
             to_pt = waypoints[0]
             self._draw_arrowhead(draw, from_pt, to_pt)
+
+    def _draw_routed_edge(
+        self, draw: ImageDraw.Draw, route: EdgeRoute, line_width: int
+    ):
+        """Draw a routed edge with waypoints (lines and arrowheads together)."""
+        self._draw_route_lines(draw, route, line_width)
+        self._draw_route_arrowheads(draw, route)
 
     def _draw_arrowhead(
         self,

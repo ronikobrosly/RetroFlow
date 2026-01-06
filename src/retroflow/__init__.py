@@ -13,6 +13,7 @@ Example:
     >>> print(flowchart)
 """
 
+from .edge_routing import route_edges_with_refinement
 from .flowchart import FlowchartGenerator, generate_flowchart
 from .graph import Graph, create_graph
 from .layout import LayoutAlgorithm, SimpleLayout, compute_layout
@@ -42,4 +43,6 @@ __all__ = [
     "ASCIICanvas",
     "render_to_png",
     "PNGRenderer",
+    # Edge routing
+    "route_edges_with_refinement",
 ]

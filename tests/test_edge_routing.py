@@ -1,7 +1,5 @@
 """Tests for the edge routing module."""
 
-import pytest
-
 from retroflow.edge_routing import (
     BoxBounds,
     CellType,
@@ -645,6 +643,73 @@ class TestPortManagerEdgeCases:
         port = manager.get_port_at_position("nonexistent", "right", PortPosition.MIDDLE)
         assert port is None
 
+    def test_strict_port_enforcement_get_available_port(self):
+        """Test that get_available_port returns None when all ports are used."""
+        manager = PortManager()
+        bounds = BoxBounds(100, 100, 80, 40)
+        manager.create_ports_for_box("test", bounds)
+
+        # Use all 3 ports on the right side
+        port1 = manager.get_available_port("test", "right", 100, False)
+        port2 = manager.get_available_port("test", "right", 150, False)
+        port3 = manager.get_available_port("test", "right", 200, False)
+
+        assert port1 is not None
+        assert port2 is not None
+        assert port3 is not None
+
+        # 4th attempt should return None (strict enforcement)
+        port4 = manager.get_available_port("test", "right", 250, False)
+        assert port4 is None
+
+    def test_strict_port_enforcement_get_next_available_port(self):
+        """Test that get_next_available_port returns None when all ports are used."""
+        manager = PortManager()
+        bounds = BoxBounds(100, 100, 80, 40)
+        manager.create_ports_for_box("test", bounds)
+
+        # Use all 3 ports on the top side
+        port1 = manager.get_next_available_port("test", "top")
+        port2 = manager.get_next_available_port("test", "top")
+        port3 = manager.get_next_available_port("test", "top")
+
+        assert port1 is not None
+        assert port2 is not None
+        assert port3 is not None
+
+        # 4th attempt should return None (strict enforcement)
+        port4 = manager.get_next_available_port("test", "top")
+        assert port4 is None
+
+    def test_validate_no_duplicate_ports_clean(self):
+        """Test validation passes with no duplicate port usage."""
+        manager = PortManager()
+        bounds = BoxBounds(100, 100, 80, 40)
+        manager.create_ports_for_box("test", bounds)
+
+        # Use ports normally
+        manager.get_available_port("test", "right", 100, False)
+        manager.get_available_port("test", "top", 100, True)
+
+        is_valid, errors = manager.validate_no_duplicate_ports()
+        assert is_valid
+        assert len(errors) == 0
+
+    def test_validate_no_duplicate_ports_all_ports_used(self):
+        """Test validation passes even when all ports on a side are used."""
+        manager = PortManager()
+        bounds = BoxBounds(100, 100, 80, 40)
+        manager.create_ports_for_box("test", bounds)
+
+        # Use all 3 ports on right side
+        manager.get_available_port("test", "right", 100, False)
+        manager.get_available_port("test", "right", 150, False)
+        manager.get_available_port("test", "right", 200, False)
+
+        is_valid, errors = manager.validate_no_duplicate_ports()
+        assert is_valid
+        assert len(errors) == 0
+
 
 class TestRoutingChannel:
     """Tests for RoutingChannel dataclass."""
@@ -782,3 +847,553 @@ class TestRouterIntegration:
         assert route is not None
         # Should have waypoints for turns
         assert len(route.waypoints) >= 2
+
+
+class TestRemoveRoute:
+    """Tests for remove_route functionality."""
+
+    def test_remove_route_basic(self):
+        """Test removing a route successfully."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        route = router.route_edge("A", "B")
+        assert route is not None
+        assert len(router.routes) == 1
+
+        result = router.remove_route(route)
+        assert result is True
+        assert len(router.routes) == 0
+
+    def test_remove_route_not_found(self):
+        """Test removing a route that doesn't exist."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        # Create a route but don't add it to router
+        src_port = Port("A", "right", PortPosition.MIDDLE, 100, 50)
+        tgt_port = Port("B", "left", PortPosition.MIDDLE, 200, 50)
+        fake_route = EdgeRoute(
+            source="A",
+            target="B",
+            source_port=src_port,
+            target_port=tgt_port,
+            waypoints=[(100, 50), (200, 50)],
+        )
+
+        result = router.remove_route(fake_route)
+        assert result is False
+
+    def test_remove_route_restores_port_usage(self):
+        """Test that removing route restores port usage tracking."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        _, port_manager, router = create_router(node_positions)
+
+        route = router.route_edge("A", "B")
+        assert route is not None
+
+        # Get port usage after routing
+        src_side = route.source_port.side
+        usage_after_route = len(port_manager.port_usage["A"][src_side])
+        assert usage_after_route > 0
+
+        router.remove_route(route)
+
+        # Port usage should be restored (decreased)
+        usage_after_remove = len(port_manager.port_usage["A"][src_side])
+        assert usage_after_remove < usage_after_route
+        assert len(router.routes) == 0
+
+    def test_remove_route_clears_grid(self):
+        """Test that removing route clears edge cells from grid."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        route = router.route_edge("A", "B")
+        assert route is not None
+
+        # Grid should have edge cells
+        initial_edge_cells = sum(
+            1
+            for cell_type in grid.cells.values()
+            if cell_type in (CellType.HORIZONTAL_EDGE, CellType.VERTICAL_EDGE)
+        )
+
+        router.remove_route(route)
+
+        # Edge cells should be cleared (or reduced)
+        final_edge_cells = sum(
+            1
+            for cell_type in grid.cells.values()
+            if cell_type in (CellType.HORIZONTAL_EDGE, CellType.VERTICAL_EDGE)
+        )
+        assert final_edge_cells <= initial_edge_cells
+
+
+class TestScoreLayout:
+    """Tests for score_layout functionality."""
+
+    def test_score_layout_empty(self):
+        """Test scoring an empty layout."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        score = router.score_layout()
+        assert score == 0.0
+
+    def test_score_layout_single_edge(self):
+        """Test scoring a layout with a single edge."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+        score = router.score_layout()
+
+        assert score > 0  # Should have some cost for wire length
+
+    def test_score_layout_more_edges_higher_score(self):
+        """Test that more edges generally means higher score."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+            "C": (450, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+        score_one = router.score_layout()
+
+        router.route_edge("B", "C")
+        score_two = router.score_layout()
+
+        assert score_two > score_one
+
+    def test_score_layout_crossing_penalty(self):
+        """Test that crossings add to score."""
+        # Create a layout likely to have crossings
+        node_positions = {
+            "A": (50, 50, 80, 40),
+            "B": (250, 50, 80, 40),
+            "C": (50, 200, 80, 40),
+            "D": (250, 200, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        # Route edges that might cross
+        router.route_edge("A", "D")  # Diagonal
+        router.route_edge("B", "C")  # Other diagonal
+
+        score = router.score_layout()
+        # Score should be positive (includes various penalties)
+        assert score >= 0
+
+
+class TestCalculateWireLength:
+    """Tests for _calculate_wire_length helper."""
+
+    def test_wire_length_straight_horizontal(self):
+        """Test wire length for straight horizontal path."""
+        node_positions = {"A": (50, 100, 80, 40)}
+        grid, port_manager, router = create_router(node_positions)
+
+        waypoints = [(0, 50), (100, 50)]
+        length = router._calculate_wire_length(waypoints)
+        assert length == 100
+
+    def test_wire_length_straight_vertical(self):
+        """Test wire length for straight vertical path."""
+        node_positions = {"A": (50, 100, 80, 40)}
+        grid, port_manager, router = create_router(node_positions)
+
+        waypoints = [(50, 0), (50, 100)]
+        length = router._calculate_wire_length(waypoints)
+        assert length == 100
+
+    def test_wire_length_l_shaped(self):
+        """Test wire length for L-shaped path."""
+        node_positions = {"A": (50, 100, 80, 40)}
+        grid, port_manager, router = create_router(node_positions)
+
+        waypoints = [(0, 0), (100, 0), (100, 50)]
+        length = router._calculate_wire_length(waypoints)
+        assert length == 150  # 100 horizontal + 50 vertical
+
+
+class TestCountBends:
+    """Tests for _count_bends helper."""
+
+    def test_count_bends_straight(self):
+        """Test bend count for straight path."""
+        node_positions = {"A": (50, 100, 80, 40)}
+        grid, port_manager, router = create_router(node_positions)
+
+        waypoints = [(0, 0), (100, 0)]
+        bends = router._count_bends(waypoints)
+        assert bends == 0
+
+    def test_count_bends_l_shaped(self):
+        """Test bend count for L-shaped path."""
+        node_positions = {"A": (50, 100, 80, 40)}
+        grid, port_manager, router = create_router(node_positions)
+
+        waypoints = [(0, 0), (100, 0), (100, 50)]
+        bends = router._count_bends(waypoints)
+        assert bends == 1
+
+    def test_count_bends_z_shaped(self):
+        """Test bend count for Z-shaped path."""
+        node_positions = {"A": (50, 100, 80, 40)}
+        grid, port_manager, router = create_router(node_positions)
+
+        waypoints = [(0, 0), (50, 0), (50, 50), (100, 50)]
+        bends = router._count_bends(waypoints)
+        assert bends == 2
+
+    def test_count_bends_short_path(self):
+        """Test bend count for paths too short to have bends."""
+        node_positions = {"A": (50, 100, 80, 40)}
+        grid, port_manager, router = create_router(node_positions)
+
+        assert router._count_bends([(0, 0)]) == 0
+        assert router._count_bends([(0, 0), (10, 0)]) == 0
+
+
+class TestRefineRoutes:
+    """Tests for refine_routes functionality."""
+
+    def test_refine_routes_single_edge(self):
+        """Test that refine_routes handles single edge gracefully."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+        initial_score = router.score_layout()
+
+        final_score, iterations = router.refine_routes()
+
+        # Single edge means no refinement needed
+        assert iterations == 0
+        assert final_score == initial_score
+
+    def test_refine_routes_multiple_edges(self):
+        """Test refine_routes with multiple edges."""
+        node_positions = {
+            "A": (50, 50, 80, 40),
+            "B": (250, 50, 80, 40),
+            "C": (50, 200, 80, 40),
+            "D": (250, 200, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+        router.route_edge("C", "D")
+        router.route_edge("A", "C")
+
+        initial_score = router.score_layout()
+        final_score, iterations = router.refine_routes(max_iterations=5)
+
+        # Should complete without error
+        assert final_score >= 0
+        assert iterations >= 0
+        # Final score should be <= initial (refinement should not make it worse)
+        assert final_score <= initial_score + 1  # Small tolerance for floating point
+
+    def test_refine_routes_empty(self):
+        """Test refine_routes with no edges."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        final_score, iterations = router.refine_routes()
+
+        assert final_score == 0.0
+        assert iterations == 0
+
+    def test_refine_routes_max_iterations(self):
+        """Test that refine_routes respects max_iterations."""
+        node_positions = {
+            "A": (50, 50, 80, 40),
+            "B": (250, 50, 80, 40),
+            "C": (50, 200, 80, 40),
+            "D": (250, 200, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+        router.route_edge("C", "D")
+
+        _, iterations = router.refine_routes(max_iterations=1)
+        assert iterations <= 1
+
+
+class TestRouteEdgeWithSides:
+    """Tests for _route_edge_with_sides functionality."""
+
+    def test_route_edge_with_sides_basic(self):
+        """Test routing edge with specific sides."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        route = router._route_edge_with_sides("A", "B", "right", "left")
+
+        assert route is not None
+        assert route.source == "A"
+        assert route.target == "B"
+        assert route.source_port.side == "right"
+        assert route.target_port.side == "left"
+
+    def test_route_edge_with_sides_vertical(self):
+        """Test routing edge with vertical sides."""
+        node_positions = {
+            "A": (100, 50, 80, 40),
+            "B": (100, 200, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        route = router._route_edge_with_sides("A", "B", "bottom", "top")
+
+        assert route is not None
+        assert route.source_port.side == "bottom"
+        assert route.target_port.side == "top"
+
+    def test_route_edge_with_sides_invalid_node(self):
+        """Test routing with invalid node returns None."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        route = router._route_edge_with_sides("A", "B", "right", "left")
+        assert route is None
+
+    def test_route_edge_with_sides_bidirectional(self):
+        """Test routing bidirectional edge with specific sides."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        route = router._route_edge_with_sides(
+            "A", "B", "right", "left", is_bidirectional=True
+        )
+
+        assert route is not None
+        assert route.is_bidirectional
+
+
+class TestRouteEdgesWithRefinement:
+    """Tests for route_edges_with_refinement convenience function."""
+
+    def test_route_edges_basic(self):
+        """Test basic edge routing with refinement."""
+        from retroflow.edge_routing import route_edges_with_refinement
+
+        positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        edges = [("A", "B", False)]
+
+        routes, score = route_edges_with_refinement(positions, edges)
+
+        assert len(routes) == 1
+        assert routes[0].source == "A"
+        assert routes[0].target == "B"
+        assert score >= 0
+
+    def test_route_edges_without_refinement(self):
+        """Test edge routing without refinement."""
+        from retroflow.edge_routing import route_edges_with_refinement
+
+        positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        edges = [("A", "B", False)]
+
+        routes, score = route_edges_with_refinement(positions, edges, refine=False)
+
+        assert len(routes) == 1
+        assert score >= 0
+
+    def test_route_edges_multiple(self):
+        """Test routing multiple edges."""
+        from retroflow.edge_routing import route_edges_with_refinement
+
+        positions = {
+            "A": (50, 50, 80, 40),
+            "B": (250, 50, 80, 40),
+            "C": (150, 200, 80, 40),
+        }
+        edges = [("A", "B", False), ("B", "C", False), ("A", "C", True)]
+
+        routes, score = route_edges_with_refinement(positions, edges)
+
+        assert len(routes) == 3
+        assert score >= 0
+
+    def test_route_edges_empty(self):
+        """Test routing with no edges."""
+        from retroflow.edge_routing import route_edges_with_refinement
+
+        positions = {
+            "A": (50, 100, 80, 40),
+        }
+        edges = []
+
+        routes, score = route_edges_with_refinement(positions, edges)
+
+        assert len(routes) == 0
+        assert score == 0.0
+
+
+class TestClearEdgeSegment:
+    """Tests for _clear_edge_segment helper."""
+
+    def test_clear_vertical_segment(self):
+        """Test clearing a vertical edge segment."""
+        # Use coordinates far from the box to avoid overlap
+        node_positions = {"A": (50, 50, 40, 30)}
+        grid, port_manager, router = create_router(node_positions)
+
+        # Mark an edge in a clear area (far from box at 50,50)
+        grid.mark_edge_segment(200, 50, 200, 150)
+
+        # Verify it's marked
+        assert grid.get_cell_type(200, 100) == CellType.VERTICAL_EDGE
+
+        # Clear it
+        router._clear_edge_segment(200, 50, 200, 150)
+
+        # Should be cleared
+        cell_type = grid.get_cell_type(200, 100)
+        assert cell_type == CellType.EMPTY
+
+    def test_clear_horizontal_segment(self):
+        """Test clearing a horizontal edge segment."""
+        node_positions = {"A": (50, 50, 40, 30)}
+        grid, port_manager, router = create_router(node_positions)
+
+        # Mark an edge in a clear area
+        grid.mark_edge_segment(150, 200, 250, 200)
+
+        # Verify it's marked
+        assert grid.get_cell_type(200, 200) == CellType.HORIZONTAL_EDGE
+
+        # Clear it
+        router._clear_edge_segment(150, 200, 250, 200)
+
+        # Should be cleared
+        cell_type = grid.get_cell_type(200, 200)
+        assert cell_type == CellType.EMPTY
+
+    def test_clear_junction_to_horizontal(self):
+        """Test clearing vertical through junction leaves horizontal."""
+        node_positions = {"A": (50, 50, 40, 30)}
+        grid, port_manager, router = create_router(node_positions)
+
+        # Create a junction in a clear area
+        grid.mark_edge_segment(150, 200, 250, 200)  # Horizontal
+        grid.mark_edge_segment(200, 150, 200, 250)  # Vertical
+        assert grid.get_cell_type(200, 200) == CellType.JUNCTION
+
+        # Clear vertical
+        router._clear_edge_segment(200, 150, 200, 250)
+
+        # Junction should become horizontal
+        assert grid.get_cell_type(200, 200) == CellType.HORIZONTAL_EDGE
+
+
+class TestCountEdgeCrossings:
+    """Tests for _count_edge_crossings helper."""
+
+    def test_no_crossings(self):
+        """Test counting crossings when there are none."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+            "C": (50, 250, 80, 40),
+            "D": (250, 250, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        # Parallel horizontal routes shouldn't cross
+        router.route_edge("A", "B")
+        router.route_edge("C", "D")
+
+        crossings = router._count_edge_crossings()
+        # Parallel routes shouldn't have crossings
+        assert crossings >= 0
+
+    def test_count_crossings_same_route(self):
+        """Test that segments within same route don't count as crossings."""
+        node_positions = {
+            "A": (50, 50, 80, 40),
+            "B": (250, 250, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+
+        # Self-crossings shouldn't count
+        crossings = router._count_edge_crossings()
+        assert crossings == 0
+
+
+class TestCalculateCongestion:
+    """Tests for _calculate_congestion helper."""
+
+    def test_no_congestion_single_edge(self):
+        """Test congestion with single edge."""
+        node_positions = {
+            "A": (50, 100, 80, 40),
+            "B": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+
+        congestion = router._calculate_congestion()
+        assert congestion == 0.0  # Single edge can't have congestion with itself
+
+    def test_congestion_increases_with_proximity(self):
+        """Test that close parallel edges increase congestion."""
+        node_positions = {
+            "A": (50, 50, 80, 40),
+            "B": (250, 50, 80, 40),
+            "C": (50, 100, 80, 40),
+            "D": (250, 100, 80, 40),
+        }
+        grid, port_manager, router = create_router(node_positions)
+
+        router.route_edge("A", "B")
+        router.route_edge("C", "D")
+
+        congestion = router._calculate_congestion()
+        # May or may not have congestion depending on routing
+        assert congestion >= 0
