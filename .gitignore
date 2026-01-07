@@ -5,6 +5,16 @@ __pycache__/
 
 *.png
 testing_retroflow.py
+example_auth.txt
+example_branching.txt
+example_cicd.txt
+example_error_handling.txt
+example_linear.txt
+example_microservice.txt
+example_pipeline.txt
+example_workflow.txt
+good_ascii_diagram_1
+good_ascii_diagram_2
 
 # C extensions
 *.so

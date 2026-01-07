@@ -1,0 +1,401 @@
+"""Unit tests for the renderer module."""
+
+from retroflow.renderer import (
+    ARROW_CHARS,
+    BOX_CHARS,
+    LINE_CHARS,
+    BoxDimensions,
+    BoxRenderer,
+    Canvas,
+    LineRenderer,
+)
+
+
+class TestBoxDimensions:
+    """Tests for BoxDimensions dataclass."""
+
+    def test_box_dimensions_creation(self):
+        """Test BoxDimensions creation."""
+        dims = BoxDimensions(width=10, height=5, text_lines=["Hello"])
+        assert dims.width == 10
+        assert dims.height == 5
+        assert dims.text_lines == ["Hello"]
+        assert dims.padding == 1  # Default
+
+    def test_box_dimensions_with_padding(self):
+        """Test BoxDimensions with custom padding."""
+        dims = BoxDimensions(width=10, height=5, text_lines=["Test"], padding=2)
+        assert dims.padding == 2
+
+
+class TestCanvas:
+    """Tests for Canvas class."""
+
+    def test_canvas_creation(self):
+        """Test canvas creation with dimensions."""
+        c = Canvas(10, 5)
+        assert c.width == 10
+        assert c.height == 5
+
+    def test_canvas_default_fill(self, canvas):
+        """Test canvas is filled with spaces by default."""
+        assert canvas.get(0, 0) == " "
+        assert canvas.get(5, 5) == " "
+
+    def test_canvas_custom_fill(self):
+        """Test canvas with custom fill character."""
+        c = Canvas(10, 5, fill_char=".")
+        assert c.get(0, 0) == "."
+
+    def test_canvas_set_and_get(self, canvas):
+        """Test setting and getting characters."""
+        canvas.set(5, 5, "X")
+        assert canvas.get(5, 5) == "X"
+
+    def test_canvas_set_out_of_bounds(self, canvas):
+        """Test setting character out of bounds does nothing."""
+        canvas.set(-1, 0, "X")
+        canvas.set(0, -1, "X")
+        canvas.set(1000, 0, "X")
+        canvas.set(0, 1000, "X")
+        # Should not raise, just silently ignore
+
+    def test_canvas_get_out_of_bounds(self, canvas):
+        """Test getting character out of bounds returns space."""
+        assert canvas.get(-1, 0) == " "
+        assert canvas.get(0, -1) == " "
+        assert canvas.get(1000, 0) == " "
+        assert canvas.get(0, 1000) == " "
+
+    def test_canvas_draw_text(self, canvas):
+        """Test drawing text on canvas."""
+        canvas.draw_text(0, 0, "Hello")
+        assert canvas.get(0, 0) == "H"
+        assert canvas.get(1, 0) == "e"
+        assert canvas.get(2, 0) == "l"
+        assert canvas.get(3, 0) == "l"
+        assert canvas.get(4, 0) == "o"
+
+    def test_canvas_draw_text_at_position(self, canvas):
+        """Test drawing text at specific position."""
+        canvas.draw_text(10, 5, "Test")
+        assert canvas.get(10, 5) == "T"
+        assert canvas.get(13, 5) == "t"
+
+    def test_canvas_render_simple(self):
+        """Test rendering canvas to string."""
+        c = Canvas(5, 3)
+        c.draw_text(0, 0, "ABC")
+        c.draw_text(0, 1, "DEF")
+        c.draw_text(0, 2, "GHI")
+        result = c.render()
+        assert "ABC" in result
+        assert "DEF" in result
+        assert "GHI" in result
+
+    def test_canvas_render_strips_trailing_spaces(self):
+        """Test that render strips trailing spaces from lines."""
+        c = Canvas(10, 2)
+        c.draw_text(0, 0, "Hi")
+        result = c.render()
+        lines = result.split("\n")
+        assert lines[0] == "Hi"  # No trailing spaces
+
+    def test_canvas_render_removes_trailing_empty_lines(self):
+        """Test that render removes trailing empty lines."""
+        c = Canvas(10, 10)
+        c.draw_text(0, 0, "Test")
+        result = c.render()
+        assert not result.endswith("\n\n")
+
+
+class TestBoxRenderer:
+    """Tests for BoxRenderer class."""
+
+    def test_box_renderer_creation(self):
+        """Test BoxRenderer creation with defaults."""
+        br = BoxRenderer()
+        assert br.max_text_width == 20
+        assert br.padding == 1
+        assert br.shadow is True
+
+    def test_box_renderer_custom_params(self):
+        """Test BoxRenderer with custom parameters."""
+        br = BoxRenderer(max_text_width=30, padding=2, shadow=False)
+        assert br.max_text_width == 30
+        assert br.padding == 2
+        assert br.shadow is False
+
+    def test_calculate_box_dimensions_short_text(self, box_renderer):
+        """Test box dimensions for short text."""
+        dims = box_renderer.calculate_box_dimensions("Hi")
+        assert dims.text_lines == ["Hi"]
+        assert dims.height == 3  # 1 text line + 2 borders
+
+    def test_calculate_box_dimensions_longer_text(self, box_renderer):
+        """Test box dimensions for longer text that wraps."""
+        # Create a renderer with small max width
+        br = BoxRenderer(max_text_width=10)
+        dims = br.calculate_box_dimensions("This is a longer text")
+        assert len(dims.text_lines) > 1
+
+    def test_calculate_box_dimensions_empty_text(self, box_renderer):
+        """Test box dimensions for empty text."""
+        dims = box_renderer.calculate_box_dimensions("")
+        assert dims.text_lines == [""]
+        assert dims.height >= 3
+
+    def test_calculate_box_dimensions_single_word(self, box_renderer):
+        """Test box dimensions for single word."""
+        dims = box_renderer.calculate_box_dimensions("Process")
+        assert dims.text_lines == ["Process"]
+
+    def test_calculate_box_dimensions_width_calculation(self, box_renderer):
+        """Test box width calculation."""
+        dims = box_renderer.calculate_box_dimensions("Test")
+        # Width should be text length + 2*padding + 2 borders
+        expected_min_width = len("Test") + 2 * box_renderer.padding + 2
+        assert dims.width >= expected_min_width
+
+    def test_draw_box_with_shadow(self, canvas, box_renderer):
+        """Test drawing a box with shadow."""
+        dims = box_renderer.calculate_box_dimensions("Test")
+        box_renderer.draw_box(canvas, 0, 0, dims)
+
+        # Check corners
+        assert canvas.get(0, 0) == BOX_CHARS["top_left"]
+        assert canvas.get(dims.width - 1, 0) == BOX_CHARS["top_right"]
+        assert canvas.get(0, dims.height - 1) == BOX_CHARS["bottom_left"]
+        assert canvas.get(dims.width - 1, dims.height - 1) == BOX_CHARS["bottom_right"]
+
+        # Check shadow on right side
+        assert canvas.get(dims.width, 1) == BOX_CHARS["shadow"]
+
+    def test_draw_box_without_shadow(self, canvas):
+        """Test drawing a box without shadow."""
+        br = BoxRenderer(shadow=False)
+        dims = br.calculate_box_dimensions("Test")
+        br.draw_box(canvas, 0, 0, dims)
+
+        # Should not have shadow character
+        assert canvas.get(dims.width, 1) != BOX_CHARS["shadow"]
+
+    def test_draw_box_text_centered(self, canvas, box_renderer):
+        """Test that text is centered in the box."""
+        dims = box_renderer.calculate_box_dimensions("Hi")
+        box_renderer.draw_box(canvas, 0, 0, dims)
+
+        # Text should be somewhere in the middle
+        rendered = canvas.render()
+        assert "Hi" in rendered
+
+    def test_draw_box_at_offset(self, canvas, box_renderer):
+        """Test drawing box at non-zero position."""
+        dims = box_renderer.calculate_box_dimensions("Test")
+        box_renderer.draw_box(canvas, 10, 5, dims)
+
+        assert canvas.get(10, 5) == BOX_CHARS["top_left"]
+
+    def test_draw_box_borders(self, canvas, box_renderer):
+        """Test that horizontal borders are drawn correctly."""
+        dims = box_renderer.calculate_box_dimensions("Test")
+        box_renderer.draw_box(canvas, 0, 0, dims)
+
+        # Top border (between corners)
+        assert canvas.get(1, 0) == BOX_CHARS["horizontal"]
+
+        # Bottom border
+        assert canvas.get(1, dims.height - 1) == BOX_CHARS["horizontal"]
+
+    def test_draw_box_sides(self, canvas, box_renderer):
+        """Test that vertical sides are drawn correctly."""
+        dims = box_renderer.calculate_box_dimensions("Test")
+        box_renderer.draw_box(canvas, 0, 0, dims)
+
+        # Left side
+        assert canvas.get(0, 1) == BOX_CHARS["vertical"]
+
+        # Right side
+        assert canvas.get(dims.width - 1, 1) == BOX_CHARS["vertical"]
+
+
+class TestLineRenderer:
+    """Tests for LineRenderer class."""
+
+    def test_line_renderer_creation(self):
+        """Test LineRenderer creation."""
+        lr = LineRenderer()
+        assert lr is not None
+
+    def test_draw_vertical_line_down(self, canvas):
+        """Test drawing vertical line downward."""
+        lr = LineRenderer()
+        lr.draw_vertical_line(canvas, 5, 0, 5, arrow_at_end=True)
+
+        # Check vertical characters
+        assert canvas.get(5, 0) == LINE_CHARS["vertical"]
+        assert canvas.get(5, 4) == LINE_CHARS["vertical"]
+
+        # Check arrow at end
+        assert canvas.get(5, 5) == ARROW_CHARS["down"]
+
+    def test_draw_vertical_line_up(self, canvas):
+        """Test drawing vertical line upward."""
+        lr = LineRenderer()
+        lr.draw_vertical_line(canvas, 5, 10, 5, arrow_at_end=True)
+
+        # Arrow should be at the top (y=5)
+        assert canvas.get(5, 5) == ARROW_CHARS["up"]
+
+    def test_draw_vertical_line_no_arrow(self, canvas):
+        """Test drawing vertical line without arrow."""
+        lr = LineRenderer()
+        lr.draw_vertical_line(canvas, 5, 0, 5, arrow_at_end=False)
+
+        # No arrow at end
+        assert canvas.get(5, 5) != ARROW_CHARS["down"]
+        assert canvas.get(5, 5) != ARROW_CHARS["up"]
+
+    def test_draw_horizontal_line_right(self, canvas):
+        """Test drawing horizontal line to the right."""
+        lr = LineRenderer()
+        lr.draw_horizontal_line(canvas, 0, 10, 5, arrow_at_end=True)
+
+        # Check horizontal characters
+        assert canvas.get(1, 5) == LINE_CHARS["horizontal"]
+
+        # Check arrow at end
+        assert canvas.get(10, 5) == ARROW_CHARS["right"]
+
+    def test_draw_horizontal_line_left(self, canvas):
+        """Test drawing horizontal line to the left."""
+        lr = LineRenderer()
+        lr.draw_horizontal_line(canvas, 10, 0, 5, arrow_at_end=True)
+
+        # Arrow should be at the left
+        assert canvas.get(0, 5) == ARROW_CHARS["left"]
+
+    def test_draw_horizontal_line_no_arrow(self, canvas):
+        """Test drawing horizontal line without arrow."""
+        lr = LineRenderer()
+        lr.draw_horizontal_line(canvas, 0, 10, 5, arrow_at_end=False)
+
+        assert canvas.get(10, 5) != ARROW_CHARS["right"]
+
+    def test_draw_corner_top_left(self, canvas):
+        """Test drawing top-left corner."""
+        lr = LineRenderer()
+        lr.draw_corner(canvas, 5, 5, "top_left")
+
+        assert canvas.get(5, 5) == LINE_CHARS["corner_top_left"]
+
+    def test_draw_corner_top_right(self, canvas):
+        """Test drawing top-right corner."""
+        lr = LineRenderer()
+        lr.draw_corner(canvas, 5, 5, "top_right")
+
+        assert canvas.get(5, 5) == LINE_CHARS["corner_top_right"]
+
+    def test_draw_corner_bottom_left(self, canvas):
+        """Test drawing bottom-left corner."""
+        lr = LineRenderer()
+        lr.draw_corner(canvas, 5, 5, "bottom_left")
+
+        assert canvas.get(5, 5) == LINE_CHARS["corner_bottom_left"]
+
+    def test_draw_corner_bottom_right(self, canvas):
+        """Test drawing bottom-right corner."""
+        lr = LineRenderer()
+        lr.draw_corner(canvas, 5, 5, "bottom_right")
+
+        assert canvas.get(5, 5) == LINE_CHARS["corner_bottom_right"]
+
+    def test_line_crossing_creates_cross(self, canvas):
+        """Test that crossing lines create cross character."""
+        lr = LineRenderer()
+
+        # Draw horizontal line first
+        lr.draw_horizontal_line(canvas, 0, 10, 5, arrow_at_end=False)
+
+        # Draw vertical line crossing it
+        lr.draw_vertical_line(canvas, 5, 0, 10, arrow_at_end=False)
+
+        # Should have cross at intersection
+        assert canvas.get(5, 5) == LINE_CHARS["cross"]
+
+    def test_corner_on_horizontal_becomes_tee(self, canvas):
+        """Test that corner on horizontal line becomes tee."""
+        lr = LineRenderer()
+
+        # Draw horizontal line first
+        canvas.set(5, 5, LINE_CHARS["horizontal"])
+
+        # Draw corner on it
+        lr.draw_corner(canvas, 5, 5, "top_left")
+
+        # Should become tee_down
+        assert canvas.get(5, 5) == LINE_CHARS["tee_down"]
+
+    def test_corner_on_vertical_becomes_tee(self, canvas):
+        """Test that corner on vertical line becomes tee."""
+        lr = LineRenderer()
+
+        # Draw vertical line first
+        canvas.set(5, 5, LINE_CHARS["vertical"])
+
+        # Draw corner on it
+        lr.draw_corner(canvas, 5, 5, "top_left")
+
+        # Should become tee_right
+        assert canvas.get(5, 5) == LINE_CHARS["tee_right"]
+
+
+class TestCharacterConstants:
+    """Tests for character constant dictionaries."""
+
+    def test_box_chars_complete(self):
+        """Test BOX_CHARS has all required keys."""
+        required = [
+            "top_left",
+            "top_right",
+            "bottom_left",
+            "bottom_right",
+            "horizontal",
+            "vertical",
+            "shadow",
+        ]
+        for key in required:
+            assert key in BOX_CHARS
+
+    def test_arrow_chars_complete(self):
+        """Test ARROW_CHARS has all required keys."""
+        required = ["down", "up", "right", "left"]
+        for key in required:
+            assert key in ARROW_CHARS
+
+    def test_line_chars_complete(self):
+        """Test LINE_CHARS has all required keys."""
+        required = [
+            "horizontal",
+            "vertical",
+            "corner_top_left",
+            "corner_top_right",
+            "corner_bottom_left",
+            "corner_bottom_right",
+            "tee_right",
+            "tee_left",
+            "tee_down",
+            "tee_up",
+            "cross",
+        ]
+        for key in required:
+            assert key in LINE_CHARS
+
+    def test_chars_are_single_characters(self):
+        """Test all characters are single character strings."""
+        for char in BOX_CHARS.values():
+            assert len(char) == 1
+        for char in ARROW_CHARS.values():
+            assert len(char) == 1
+        for char in LINE_CHARS.values():
+            assert len(char) == 1

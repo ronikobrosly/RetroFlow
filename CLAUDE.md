@@ -80,10 +80,10 @@ The `publish.yml` workflow will automatically:
 
 - **Simple syntax**: Define flowcharts using intuitive `A -> B` arrow notation
 - **ASCII output**: Generate text-based flowcharts for terminals and documentation
-- **PNG export**: Create high-resolution images for presentations and reports
-- **Intelligent layout**: Automatic node positioning with the Sugiyama algorithm
-- **Cycle detection**: Handles cyclic graphs gracefully
-- **Customizable**: Adjust box sizes, spacing, and layout algorithms
+- **Intelligent layout**: Automatic node positioning using NetworkX with barycenter heuristic
+- **Cycle detection**: Handles cyclic graphs gracefully with back-edge routing
+- **Customizable**: Adjust text width, box sizes, spacing, and shadows
+- **Unicode box-drawing**: Beautiful boxes with optional shadow effects
 
 
 ## Project Structure
@@ -95,21 +95,15 @@ retroflow/
 │   └── test.yml             # CI workflow (lint + test matrix)
 ├── src/retroflow/
 │   ├── __init__.py          # Public API exports
-│   ├── flowchart.py         # FlowchartGenerator class (main entry point)
+│   ├── generator.py         # FlowchartGenerator class (main entry point)
 │   ├── parser.py            # Text input parser (A -> B syntax)
-│   ├── graph.py             # Graph data structure and algorithms
-│   ├── layout.py            # Layout algorithms (Sugiyama, simple)
-│   ├── renderer.py          # ASCII canvas and rendering
-│   ├── png_renderer.py      # PNG image generation
+│   ├── layout.py            # NetworkX-based layout with barycenter ordering
+│   ├── renderer.py          # ASCII canvas, box drawing, and line rendering
+│   ├── router.py            # Edge routing utilities (ports, waypoints)
 │   └── py.typed             # PEP 561 type marker
 ├── tests/
 │   ├── conftest.py          # Shared pytest fixtures
-│   ├── test_parser.py       # Parser tests
-│   ├── test_graph.py        # Graph tests
-│   ├── test_layout.py       # Layout algorithm tests
-│   ├── test_renderer.py     # ASCII renderer tests
-│   ├── test_png_renderer.py # PNG renderer tests
-│   └── test_integration.py  # End-to-end tests
+│   └── ...                  # Test modules
 ├── codecov.yml              # Coverage threshold config (95%)
 ├── pyproject.toml           # Package metadata and dependencies
 ├── README.md                # User documentation
@@ -120,9 +114,8 @@ retroflow/
 
 | File | Purpose |
 |------|---------|
-| `flowchart.py` | Main `FlowchartGenerator` class - orchestrates parsing, layout, and rendering |
+| `generator.py` | Main `FlowchartGenerator` class - orchestrates parsing, layout, and rendering |
 | `parser.py` | Parses `A -> B` text syntax into connection tuples |
-| `graph.py` | Directed graph with cycle detection, topological sort, feedback edge finding |
-| `layout.py` | Sugiyama layered layout algorithm for node positioning |
-| `renderer.py` | ASCII canvas with box drawing, lines, and arrows |
-| `png_renderer.py` | PIL-based PNG generation with shadows and arrowheads |
+| `layout.py` | `NetworkXLayout` class using networkx for graph representation, cycle detection, topological sorting, and barycenter-based node ordering. `SugiyamaLayout` is an alias for backwards compatibility. |
+| `renderer.py` | `Canvas` for 2D character grid, `BoxRenderer` for Unicode box drawing with shadows, `LineRenderer` for edge drawing utilities |
+| `router.py` | `EdgeRouter` for port allocation and orthogonal edge routing (utility module for future use) |

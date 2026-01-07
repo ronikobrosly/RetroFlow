@@ -2,7 +2,7 @@
 
 import pytest
 
-from retroflow import FlowchartGenerator, create_graph
+from retroflow import BoxRenderer, Canvas, FlowchartGenerator, Parser, SugiyamaLayout
 
 
 @pytest.fixture
@@ -58,19 +58,47 @@ def generator():
 
 
 @pytest.fixture
-def simple_graph():
-    """Pre-built simple graph."""
-    connections = [("A", "B"), ("B", "C"), ("C", "D")]
-    return create_graph(connections)
+def parser():
+    """Default Parser instance."""
+    return Parser()
 
 
 @pytest.fixture
-def branching_graph():
-    """Pre-built branching graph."""
-    connections = [
+def layout_engine():
+    """Default SugiyamaLayout instance."""
+    return SugiyamaLayout()
+
+
+@pytest.fixture
+def simple_connections():
+    """Simple linear connections."""
+    return [("A", "B"), ("B", "C"), ("C", "D")]
+
+
+@pytest.fixture
+def branching_connections():
+    """Branching connections."""
+    return [
         ("Start", "Process1"),
         ("Start", "Process2"),
         ("Process1", "End"),
         ("Process2", "End"),
     ]
-    return create_graph(connections)
+
+
+@pytest.fixture
+def cyclic_connections():
+    """Cyclic connections."""
+    return [("A", "B"), ("B", "C"), ("C", "A")]
+
+
+@pytest.fixture
+def canvas():
+    """Default canvas for testing."""
+    return Canvas(80, 40)
+
+
+@pytest.fixture
+def box_renderer():
+    """Default BoxRenderer instance."""
+    return BoxRenderer()

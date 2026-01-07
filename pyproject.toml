@@ -1,6 +1,6 @@
 [project]
 name = "retroflow"
-version = "0.2.1"
+version = "0.3.0"
 description = "Generate beautiful ASCII and PNG flowcharts from simple text descriptions"
 authors = [{name = "Roni Kobrosly", email = "roni.kobrosly@gmail.com"}]
 readme = "README.md"
@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "pillow>=9.0.0",
+    "networkx>=3.0.0",
 ]
 
 [project.urls]

@@ -1,302 +1,239 @@
 """
-Layout module for flowchart generator.
+Layout module using networkx for hierarchical graph layout.
 
-Implements sophisticated layout algorithms for positioning nodes.
+Uses networkx for:
+- Graph representation
+- Cycle detection
+- Topological sorting / layer assignment
+- Node ordering within layers
 """
 
-import math
-from collections import deque
-from typing import Dict, List, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Set, Tuple
+
+import networkx as nx
 
 
-class LayoutAlgorithm:
+@dataclass
+class NodeLayout:
+    """Represents a node's layout information."""
+
+    name: str
+    layer: int = 0
+    position: int = 0  # Position within layer
+    x: int = 0  # Character x coordinate
+    y: int = 0  # Character y coordinate
+    width: int = 0
+    height: int = 0
+
+
+@dataclass
+class LayoutResult:
+    """Result of the layout algorithm."""
+
+    nodes: Dict[str, NodeLayout] = field(default_factory=dict)
+    layers: List[List[str]] = field(default_factory=list)
+    edges: List[Tuple[str, str]] = field(default_factory=list)
+    back_edges: Set[Tuple[str, str]] = field(default_factory=set)
+    has_cycles: bool = False
+
+
+class NetworkXLayout:
     """
-    Implements a layered graph layout algorithm (Sugiyama-style).
+    Graph layout using networkx.
 
-    The algorithm works in phases:
-    1. Layer assignment - assign nodes to vertical layers
-    2. Crossing minimization - order nodes within layers
-    3. Horizontal positioning - position nodes to minimize width
+    For DAGs: uses topological_generations for layer assignment
+    For cyclic graphs: identifies back edges, breaks cycles, then layouts
     """
 
-    def __init__(self, graph, horizontal_spacing=4, vertical_spacing=3):
-        self.graph = graph
-        self.horizontal_spacing = horizontal_spacing
-        self.vertical_spacing = vertical_spacing
-        self.layers = []  # List of lists of nodes
-        self.positions = {}  # node -> (x, y) in layer coordinates
-        self.feedback_edges = []
+    def __init__(self):
+        self.graph: nx.DiGraph = None
+        self.back_edges: Set[Tuple[str, str]] = set()
 
-    def compute_layout(self) -> Dict[str, Tuple[int, int]]:
+    def layout(self, connections: List[Tuple[str, str]]) -> LayoutResult:
         """
-        Compute layout positions for all nodes.
+        Compute layout for the given connections.
+
+        Args:
+            connections: List of (source, target) tuples
 
         Returns:
-            Dictionary mapping node names to (layer, position_in_layer) tuples
+            LayoutResult with node positions and layer assignments
         """
-        # Phase 1: Handle cycles by finding feedback edges
-        self._handle_cycles()
+        # Build networkx graph
+        self.graph = nx.DiGraph()
+        self.graph.add_edges_from(connections)
 
-        # Phase 2: Assign nodes to layers
-        self._assign_layers()
+        # Check for cycles
+        has_cycles = not nx.is_directed_acyclic_graph(self.graph)
+        self.back_edges = set()
 
-        # Phase 3: Minimize crossings
-        self._minimize_crossings()
+        if has_cycles:
+            # Find and remove back edges to create a DAG
+            self._break_cycles()
 
-        # Phase 4: Optimize for square layout
-        self._optimize_for_square_layout()
+        # Assign layers using topological generations
+        layers = self._assign_layers()
 
-        # Phase 5: Assign final positions
-        self._assign_positions()
+        # Order nodes within each layer to minimize crossings
+        layers = self._order_layers(layers)
 
-        return self.positions
+        # Build result
+        result = LayoutResult()
+        result.has_cycles = has_cycles
+        result.back_edges = self.back_edges
+        result.layers = layers
+        result.edges = list(connections)
 
-    def _handle_cycles(self):
-        """Identify feedback edges to break cycles."""
-        self.feedback_edges = self.graph.find_feedback_edges()
-
-    def _is_feedback_edge(self, source: str, target: str) -> bool:
-        """Check if an edge is a feedback edge."""
-        return (source, target) in self.feedback_edges
-
-    def _assign_layers(self):
-        """
-        Assign nodes to layers using longest path layering.
-        This minimizes edge span.
-        """
-        # Calculate layer for each node (longest path from roots)
-        node_layers = {}
-
-        # Start with roots
-        roots = self.graph.get_roots()
-        if not roots:
-            # If no roots (cycle), pick nodes with minimum in-degree
-            in_degrees = {
-                node: len(
-                    [
-                        s
-                        for s in self.graph.get_predecessors(node)
-                        if not self._is_feedback_edge(s, node)
-                    ]
+        # Create node layouts
+        for layer_idx, layer in enumerate(layers):
+            for pos_idx, node_name in enumerate(layer):
+                result.nodes[node_name] = NodeLayout(
+                    name=node_name, layer=layer_idx, position=pos_idx
                 )
-                for node in self.graph.nodes
-            }
-            roots = [
-                node
-                for node, deg in in_degrees.items()
-                if deg == min(in_degrees.values())
-            ]
 
-        # BFS to assign layers
-        queue = deque([(node, 0) for node in roots])
+        return result
+
+    def _break_cycles(self) -> None:
+        """
+        Identify back edges and create a DAG by conceptually removing them.
+        Uses DFS to find back edges.
+        """
+        # Find all cycles
+        try:
+            cycles = list(nx.simple_cycles(self.graph))
+        except Exception:
+            cycles = []
+
+        if not cycles:
+            return
+
+        # For each cycle, we need to identify one edge to "break"
+        # We'll use a DFS-based approach to find back edges
         visited = set()
+        rec_stack = set()
 
-        while queue:
-            node, layer = queue.popleft()
-
-            if node in visited:
-                # Update layer if we found a longer path
-                node_layers[node] = max(node_layers.get(node, 0), layer)
-                continue
-
+        def dfs(node):
             visited.add(node)
-            node_layers[node] = layer
+            rec_stack.add(node)
 
-            # Add successors (ignoring feedback edges)
-            for successor in self.graph.get_successors(node):
-                if not self._is_feedback_edge(node, successor):
-                    queue.append((successor, layer + 1))
+            for successor in list(self.graph.successors(node)):
+                if successor not in visited:
+                    dfs(successor)
+                elif successor in rec_stack:
+                    # This is a back edge
+                    self.back_edges.add((node, successor))
 
-        # Handle any unvisited nodes (shouldn't happen but be safe)
-        for node in self.graph.nodes:
-            if node not in node_layers:
-                node_layers[node] = 0
+            rec_stack.remove(node)
 
-        # Group nodes by layer
-        max_layer = max(node_layers.values()) if node_layers else 0
-        self.layers = [[] for _ in range(max_layer + 1)]
+        # Start DFS from nodes with no predecessors, or any node if all have them
+        roots = [n for n in self.graph.nodes() if self.graph.in_degree(n) == 0]
+        if not roots:
+            roots = [list(self.graph.nodes())[0]]
 
-        for node, layer in node_layers.items():
-            self.layers[layer].append(node)
+        for root in roots:
+            if root not in visited:
+                dfs(root)
 
-    def _minimize_crossings(self):
+        # Visit any remaining unvisited nodes
+        for node in self.graph.nodes():
+            if node not in visited:
+                dfs(node)
+
+    def _assign_layers(self) -> List[List[str]]:
         """
-        Minimize edge crossings using barycenter heuristic.
-        Iteratively reorder nodes within layers.
+        Assign nodes to layers using longest path method.
         """
-        if len(self.layers) <= 1:
-            return
+        # Create a working graph without back edges
+        working_graph = self.graph.copy()
+        working_graph.remove_edges_from(self.back_edges)
 
-        # Perform multiple passes
-        for iteration in range(3):
-            # Forward pass (top to bottom)
-            for i in range(1, len(self.layers)):
-                self._reorder_layer(i, self.layers[i - 1])
+        # Use longest path for layer assignment
+        # This places nodes as far down as possible
+        node_layer: Dict[str, int] = {}
 
-            # Backward pass (bottom to top)
-            for i in range(len(self.layers) - 2, -1, -1):
-                self._reorder_layer(i, self.layers[i + 1])
+        # Process in topological order
+        try:
+            topo_order = list(nx.topological_sort(working_graph))
+        except nx.NetworkXUnfeasible:
+            # Still has cycles somehow, fall back to simple ordering
+            topo_order = list(working_graph.nodes())
 
-    def _reorder_layer(self, layer_idx: int, reference_layer: List[str]):
-        """Reorder nodes in a layer based on barycenter of connected nodes."""
-        layer = self.layers[layer_idx]
-
-        # Calculate barycenter for each node
-        barycenters = []
-        for node in layer:
-            positions = []
-
-            # Get positions of connected nodes in reference layer
-            for ref_node in reference_layer:
-                ref_pos = reference_layer.index(ref_node)
-
-                # Check if connected (either direction, skip feedback edges)
-                if node in self.graph.get_successors(ref_node):
-                    if not self._is_feedback_edge(ref_node, node):
-                        positions.append(ref_pos)
-                if node in self.graph.get_predecessors(ref_node):
-                    if not self._is_feedback_edge(node, ref_node):
-                        positions.append(ref_pos)
-
-            # Calculate barycenter
-            if positions:
-                barycenter = sum(positions) / len(positions)
+        for node in topo_order:
+            predecessors = list(working_graph.predecessors(node))
+            if not predecessors:
+                node_layer[node] = 0
             else:
-                barycenter = len(reference_layer) / 2  # Center if no connections
+                node_layer[node] = max(node_layer.get(p, 0) for p in predecessors) + 1
 
-            barycenters.append((barycenter, node))
+        # Group by layer
+        if not node_layer:
+            return []
 
-        # Sort by barycenter
-        barycenters.sort()
-        self.layers[layer_idx] = [node for _, node in barycenters]
+        max_layer = max(node_layer.values())
+        layers: List[List[str]] = [[] for _ in range(max_layer + 1)]
 
-    def _optimize_for_square_layout(self):
+        for node, layer in node_layer.items():
+            layers[layer].append(node)
+
+        return layers
+
+    def _order_layers(self, layers: List[List[str]]) -> List[List[str]]:
         """
-        Optimize layer distribution to create a more square-like layout.
-        Tries to balance height vs width.
+        Order nodes within each layer to minimize edge crossings.
+        Uses barycenter heuristic.
         """
-        total_nodes = len(self.graph.nodes)
-        if total_nodes == 0:
-            return
+        if len(layers) <= 1:
+            return layers
 
-        # Calculate ideal aspect ratio (closer to 1 = more square)
-        ideal_layers = math.ceil(math.sqrt(total_nodes))
-        current_layers = len(self.layers)
+        # Create working graph without back edges for ordering
+        working_graph = self.graph.copy()
+        working_graph.remove_edges_from(self.back_edges)
 
-        # If we have too many layers, try to redistribute
-        if current_layers > ideal_layers * 1.5:
-            self._redistribute_layers(ideal_layers)
+        # Multiple passes of barycenter ordering
+        for _ in range(4):
+            # Forward pass
+            for i in range(1, len(layers)):
+                layers[i] = self._order_layer_by_barycenter(
+                    layers[i], layers[i - 1], working_graph, use_predecessors=True
+                )
 
-    def _redistribute_layers(self, target_layer_count: int):
+            # Backward pass
+            for i in range(len(layers) - 2, -1, -1):
+                layers[i] = self._order_layer_by_barycenter(
+                    layers[i], layers[i + 1], working_graph, use_predecessors=False
+                )
+
+        return layers
+
+    def _order_layer_by_barycenter(
+        self,
+        layer: List[str],
+        ref_layer: List[str],
+        graph: nx.DiGraph,
+        use_predecessors: bool,
+    ) -> List[str]:
         """
-        Redistribute nodes across fewer layers to create wider layout.
-        This is a heuristic approach.
+        Order nodes by barycenter (average position of connected nodes).
         """
-        if len(self.layers) <= target_layer_count:
-            return
+        ref_positions = {node: i for i, node in enumerate(ref_layer)}
 
-        # Calculate compression ratio
-        compression = len(self.layers) / target_layer_count
+        def barycenter(node: str) -> float:
+            if use_predecessors:
+                neighbors = list(graph.predecessors(node))
+            else:
+                neighbors = list(graph.successors(node))
 
-        # Create new layer assignment
-        new_layers = [[] for _ in range(target_layer_count)]
+            positions = [ref_positions[n] for n in neighbors if n in ref_positions]
 
-        for old_layer_idx, layer in enumerate(self.layers):
-            new_layer_idx = min(
-                int(old_layer_idx / compression), target_layer_count - 1
-            )
-            new_layers[new_layer_idx].extend(layer)
+            if not positions:
+                # Keep original order for nodes with no connections to ref layer
+                return layer.index(node) if node in layer else 0
 
-        # Only apply if it doesn't create too-wide layers
-        max_width = max(len(layer) for layer in new_layers)
-        if max_width <= target_layer_count * 1.5:
-            self.layers = new_layers
+            return sum(positions) / len(positions)
 
-    def _assign_positions(self):
-        """Assign final (x, y) positions to nodes."""
-        self.positions = {}
-
-        for layer_idx, layer in enumerate(self.layers):
-            for pos_idx, node in enumerate(layer):
-                # y position based on layer
-                y = layer_idx
-                # x position based on position in layer
-                x = pos_idx
-                self.positions[node] = (x, y)
-
-    def get_layout_dimensions(self) -> Tuple[int, int]:
-        """
-        Get the dimensions of the layout in layer coordinates.
-
-        Returns:
-            (width, height) tuple
-        """
-        if not self.layers:
-            return (0, 0)
-
-        width = max(len(layer) for layer in self.layers)
-        height = len(self.layers)
-
-        return (width, height)
-
-    def get_edges_for_rendering(self) -> List[Tuple[str, str, bool]]:
-        """
-        Get edges with information about whether they're reversed.
-
-        Returns:
-            List of (source, target, is_feedback) tuples
-        """
-        edges = []
-        for source, target in self.graph.edges:
-            is_feedback = self._is_feedback_edge(source, target)
-            edges.append((source, target, is_feedback))
-        return edges
+        return sorted(layer, key=barycenter)
 
 
-class SimpleLayout:
-    """Simpler vertical layout for small graphs."""
-
-    def __init__(self, graph):
-        self.graph = graph
-        self.positions = {}
-
-    def compute_layout(self) -> Dict[str, Tuple[int, int]]:
-        """Compute simple vertical layout."""
-        nodes = self.graph.topological_sort()
-
-        for idx, node in enumerate(nodes):
-            self.positions[node] = (0, idx)
-
-        return self.positions
-
-    def get_layout_dimensions(self) -> Tuple[int, int]:
-        """Get layout dimensions."""
-        if not self.positions:
-            return (0, 0)
-        return (1, len(self.positions))
-
-    def get_edges_for_rendering(self) -> List[Tuple[str, str, bool]]:
-        """Get edges for rendering."""
-        return [(s, t, False) for s, t in self.graph.edges]
-
-
-def compute_layout(graph, algorithm="layered", **kwargs) -> LayoutAlgorithm:
-    """
-    Compute layout for a graph.
-
-    Args:
-        graph: Graph object
-        algorithm: 'layered' or 'simple'
-        **kwargs: Additional parameters for layout algorithm
-
-    Returns:
-        Layout object with computed positions
-    """
-    if algorithm == "simple" or len(graph.nodes) <= 3:
-        layout = SimpleLayout(graph)
-        layout.compute_layout()
-        return layout
-    else:
-        layout = LayoutAlgorithm(graph, **kwargs)
-        layout.compute_layout()
-        return layout
+# Backward compatibility alias
+SugiyamaLayout = NetworkXLayout
