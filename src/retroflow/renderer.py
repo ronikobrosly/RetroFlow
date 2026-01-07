@@ -100,7 +100,7 @@ class BoxRenderer:
     Renders boxes with shadows and wrapped text.
     """
 
-    def __init__(self, max_text_width: int = 20, padding: int = 1, shadow: bool = True):
+    def __init__(self, max_text_width: int = 20, padding: int = 2, shadow: bool = True):
         self.max_text_width = max_text_width
         self.padding = padding
         self.shadow = shadow
@@ -141,9 +141,8 @@ class BoxRenderer:
         # Box width = text_width + 2*padding + 2 (for borders)
         box_width = text_width + 2 * self.padding + 2
 
-        # Box height = num_lines + 2*padding + 2 (for borders)
-        # But padding is typically 0 for vertical, let's use 0 vertical padding
-        box_height = len(lines) + 2  # Just borders, no vertical padding
+        # Box height = num_lines + 2 (for borders) + 2 (for vertical padding)
+        box_height = len(lines) + 4
 
         return BoxDimensions(
             width=box_width, height=box_height, text_lines=lines, padding=self.padding
@@ -194,9 +193,9 @@ class BoxRenderer:
             for i in range(1, w + 1):
                 canvas.set(x + i, y + h, BOX_CHARS["shadow"])
 
-        # Draw text (centered)
+        # Draw text (centered, with 1 line vertical padding)
         for line_idx, line in enumerate(dimensions.text_lines):
-            text_y = y + 1 + line_idx
+            text_y = y + 2 + line_idx
             # Center the text within the box
             available_width = w - 2  # Minus borders
             text_x = x + 1 + (available_width - len(line)) // 2

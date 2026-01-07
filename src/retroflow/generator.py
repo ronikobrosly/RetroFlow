@@ -531,21 +531,69 @@ class FlowchartGenerator:
         src_x, src_y = box_positions[source]
         tgt_x, tgt_y = box_positions[target]
 
-        # Calculate port positions (where edge exits/enters box)
-        # Source: exit from bottom
-        src_port_count = len(source_targets)
-        src_port_idx = source_targets.index(target)
-        src_port_x = self._calculate_port_x(
-            src_x, src_dims.width, src_port_idx, src_port_count
-        )
-        src_port_y = src_y + src_dims.height - 1  # Bottom border
+        # Check if boxes overlap horizontally (inside borders)
+        src_left = src_x + 1
+        src_right = src_x + src_dims.width - 2
+        tgt_left = tgt_x + 1
+        tgt_right = tgt_x + tgt_dims.width - 2
 
-        # Target: enter from top
-        tgt_port_count = len(target_sources)
-        tgt_port_idx = target_sources.index(source)
-        tgt_port_x = self._calculate_port_x(
-            tgt_x, tgt_dims.width, tgt_port_idx, tgt_port_count
-        )
+        overlap_left = max(src_left, tgt_left)
+        overlap_right = min(src_right, tgt_right)
+        has_overlap = overlap_left < overlap_right
+
+        if has_overlap:
+            # Boxes overlap - find which targets from this source also overlap
+            overlapping_targets = []
+            for t in source_targets:
+                t_dims = box_dimensions[t]
+                t_x, _ = box_positions[t]
+                t_left = t_x + 1
+                t_right = t_x + t_dims.width - 2
+                t_overlap_left = max(src_left, t_left)
+                t_overlap_right = min(src_right, t_right)
+                if t_overlap_left < t_overlap_right:
+                    overlapping_targets.append(t)
+
+            # Distribute ports within the overlap region for overlapping targets
+            overlap_width = overlap_right - overlap_left
+            overlap_count = len(overlapping_targets)
+            overlap_idx = overlapping_targets.index(target)
+
+            if overlap_count == 1:
+                # Single overlapping target - use center of overlap
+                port_x = (overlap_left + overlap_right) // 2
+            else:
+                # Multiple overlapping targets - distribute within overlap
+                if overlap_width >= overlap_count * 2:
+                    # Enough space to distribute
+                    spacing = overlap_width // (overlap_count + 1)
+                    port_x = overlap_left + spacing * (overlap_idx + 1)
+                else:
+                    # Tight space - just use center offset slightly
+                    port_x = overlap_left + (overlap_width * (overlap_idx + 1)) // (
+                        overlap_count + 1
+                    )
+
+            # Use same x for both source and target (straight line)
+            src_port_x = port_x
+            tgt_port_x = port_x
+        else:
+            # No horizontal overlap - use distributed ports
+            # Source: exit from bottom
+            src_port_count = len(source_targets)
+            src_port_idx = source_targets.index(target)
+            src_port_x = self._calculate_port_x(
+                src_x, src_dims.width, src_port_idx, src_port_count
+            )
+
+            # Target: enter from top
+            tgt_port_count = len(target_sources)
+            tgt_port_idx = target_sources.index(source)
+            tgt_port_x = self._calculate_port_x(
+                tgt_x, tgt_dims.width, tgt_port_idx, tgt_port_count
+            )
+
+        src_port_y = src_y + src_dims.height - 1  # Bottom border
         tgt_port_y = tgt_y  # Top border
 
         # Modify source bottom border to show exit point (tee down)

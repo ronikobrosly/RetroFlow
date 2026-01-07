@@ -116,7 +116,7 @@ class TestBoxRenderer:
         """Test BoxRenderer creation with defaults."""
         br = BoxRenderer()
         assert br.max_text_width == 20
-        assert br.padding == 1
+        assert br.padding == 2
         assert br.shadow is True
 
     def test_box_renderer_custom_params(self):
@@ -130,7 +130,7 @@ class TestBoxRenderer:
         """Test box dimensions for short text."""
         dims = box_renderer.calculate_box_dimensions("Hi")
         assert dims.text_lines == ["Hi"]
-        assert dims.height == 3  # 1 text line + 2 borders
+        assert dims.height == 5  # 1 text line + 2 borders + 2 vertical padding
 
     def test_calculate_box_dimensions_longer_text(self, box_renderer):
         """Test box dimensions for longer text that wraps."""
