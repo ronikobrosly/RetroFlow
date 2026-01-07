@@ -80,10 +80,13 @@ The `publish.yml` workflow will automatically:
 
 - **Simple syntax**: Define flowcharts using intuitive `A -> B` arrow notation
 - **ASCII output**: Generate text-based flowcharts for terminals and documentation
+- **PNG export**: Save high-resolution PNG images with customizable fonts
 - **Intelligent layout**: Automatic node positioning using NetworkX with barycenter heuristic
 - **Cycle detection**: Handles cyclic graphs gracefully with back-edge routing
-- **Customizable**: Adjust text width, box sizes, spacing, and shadows
+- **Customizable**: Adjust text width, box sizes, spacing, shadows, and fonts
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
+- **Title banners**: Optional double-line bordered titles above diagrams
+- **Horizontal flow**: Left-to-right layout mode (`direction="LR"`) for compact diagrams
 
 
 ## Project Structure

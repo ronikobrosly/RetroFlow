@@ -19,6 +19,16 @@ BOX_CHARS = {
     "shadow": "░",
 }
 
+# Double-line box characters (for titles/headers)
+BOX_CHARS_DOUBLE = {
+    "top_left": "╔",
+    "top_right": "╗",
+    "bottom_left": "╚",
+    "bottom_right": "╝",
+    "horizontal": "═",
+    "vertical": "║",
+}
+
 # Rounded corner variants
 BOX_CHARS_ROUNDED = {
     "top_left": "╭",
@@ -332,3 +342,74 @@ class LineRenderer:
                 canvas.set(x, y, LINE_CHARS["tee_left"])
         elif current.startswith("corner_") or current in LINE_CHARS.values():
             canvas.set(x, y, LINE_CHARS["cross"])
+
+
+class TitleRenderer:
+    """
+    Renders title banners with double-line borders.
+    """
+
+    def __init__(self, padding: int = 2):
+        """
+        Initialize the title renderer.
+
+        Args:
+            padding: Horizontal padding inside the title box
+        """
+        self.padding = padding
+        self.box_chars = BOX_CHARS_DOUBLE
+
+    def calculate_title_dimensions(self, title: str, min_width: int = 0) -> tuple:
+        """
+        Calculate the dimensions needed for a title banner.
+
+        Args:
+            title: The title text
+            min_width: Minimum width for the title box
+
+        Returns:
+            Tuple of (width, height) for the title box
+        """
+        # Title box: border + padding + text + padding + border
+        text_width = len(title)
+        box_width = max(text_width + 2 * self.padding + 2, min_width)
+        box_height = 3  # Top border, title text, bottom border
+        return box_width, box_height
+
+    def draw_title(self, canvas: Canvas, x: int, y: int, title: str, width: int) -> int:
+        """
+        Draw a title banner with double-line border.
+
+        Args:
+            canvas: The canvas to draw on
+            x: X position (left edge)
+            y: Y position (top edge)
+            title: The title text
+            width: Total width of the title box
+
+        Returns:
+            The height of the title box (for positioning content below)
+        """
+        chars = self.box_chars
+
+        # Draw top border
+        canvas.set(x, y, chars["top_left"])
+        for i in range(1, width - 1):
+            canvas.set(x + i, y, chars["horizontal"])
+        canvas.set(x + width - 1, y, chars["top_right"])
+
+        # Draw middle row with title (centered)
+        canvas.set(x, y + 1, chars["vertical"])
+        canvas.set(x + width - 1, y + 1, chars["vertical"])
+
+        # Center the title text
+        text_start = x + (width - len(title)) // 2
+        canvas.draw_text(text_start, y + 1, title)
+
+        # Draw bottom border
+        canvas.set(x, y + 2, chars["bottom_left"])
+        for i in range(1, width - 1):
+            canvas.set(x + i, y + 2, chars["horizontal"])
+        canvas.set(x + width - 1, y + 2, chars["bottom_right"])
+
+        return 3  # Height of the title box

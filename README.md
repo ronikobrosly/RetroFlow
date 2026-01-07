@@ -99,6 +99,8 @@ print(flowchart)
 - **Cycle detection**: Handles cyclic graphs gracefully with back-edge routing
 - **Customizable**: Adjust text width, box sizes, spacing, shadows, and fonts
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
+- **Title banners**: Optional double-line bordered titles above diagrams
+- **Horizontal flow**: Left-to-right layout mode for compact linear diagrams
 
 ## Usage
 
@@ -194,6 +196,8 @@ generator = FlowchartGenerator(
     vertical_spacing=6,     # Space between boxes vertically (default: 6)
     shadow=True,            # Whether to draw box shadows (default: True)
     font="Cascadia Code",   # Font for PNG output (default: None, uses system font)
+    title="My Diagram",     # Optional title banner with double-line border (default: None)
+    direction="TB",         # Flow direction: "TB" (top-to-bottom) or "LR" (left-to-right)
 )
 ```
 
@@ -216,6 +220,61 @@ Common monospace fonts that work well:
 - **Linux**: `DejaVu Sans Mono`, `Ubuntu Mono`, `Liberation Mono`
 
 If the specified font isn't found, RetroFlow automatically falls back to available system fonts.
+
+### Title Banner
+
+Add a title banner with a double-line border above your flowchart:
+
+```python
+generator = FlowchartGenerator(title="CI/CD Pipeline")
+result = generator.generate("""
+    Build -> Test
+    Test -> Deploy
+""")
+```
+
+Output:
+```
+╔═════════════════════╗
+║   CI/CD Pipeline    ║
+╚═════════════════════╝
+
+    ┌─────────┐
+    │  Build  │░
+    └────┬────┘░
+     ░░░░│░░░░░░
+         │
+         ▼
+    ┌─────────┐
+    │  Test   │░
+    └────┬────┘░
+     ░░░░│░░░░░░
+         │
+         ▼
+    ┌──────────┐
+    │  Deploy  │░
+    └──────────┘░
+     ░░░░░░░░░░░░
+```
+
+You can also override the title per-call:
+```python
+generator.generate("A -> B", title="Override Title")
+```
+
+### Horizontal Flow Mode
+
+Use `direction="LR"` for left-to-right layouts instead of top-to-bottom:
+
+```python
+generator = FlowchartGenerator(direction="LR")
+result = generator.generate("""
+    Start -> Process
+    Process -> End
+""")
+```
+
+This produces a horizontal flowchart where nodes flow from left to right, which can be more compact for linear processes.
 
 ## Input Format
 

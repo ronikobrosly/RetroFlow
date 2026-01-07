@@ -3,10 +3,11 @@
 import os
 import tempfile
 
+import pytest
 from PIL import Image
 
 from retroflow.generator import FlowchartGenerator
-from retroflow.renderer import ARROW_CHARS, BOX_CHARS
+from retroflow.renderer import ARROW_CHARS, BOX_CHARS, BOX_CHARS_DOUBLE
 
 
 class TestFlowchartGeneratorInit:
@@ -23,6 +24,8 @@ class TestFlowchartGeneratorInit:
         assert gen.rounded is False
         assert gen.compact is False
         assert gen.font is None
+        assert gen.title is None
+        assert gen.direction == "TB"
 
     def test_custom_max_text_width(self):
         """Test FlowchartGenerator with custom max_text_width."""
@@ -85,6 +88,33 @@ class TestFlowchartGeneratorInit:
         assert gen.parser is not None
         assert gen.layout_engine is not None
         assert gen.box_renderer is not None
+        assert gen.title_renderer is not None
+
+    def test_title_initialization(self):
+        """Test FlowchartGenerator with title parameter."""
+        gen = FlowchartGenerator(title="My Flowchart")
+        assert gen.title == "My Flowchart"
+
+    def test_direction_tb(self):
+        """Test FlowchartGenerator with TB direction."""
+        gen = FlowchartGenerator(direction="TB")
+        assert gen.direction == "TB"
+
+    def test_direction_lr(self):
+        """Test FlowchartGenerator with LR direction."""
+        gen = FlowchartGenerator(direction="LR")
+        assert gen.direction == "LR"
+
+    def test_direction_lowercase(self):
+        """Test FlowchartGenerator normalizes direction to uppercase."""
+        gen = FlowchartGenerator(direction="lr")
+        assert gen.direction == "LR"
+
+    def test_direction_invalid(self):
+        """Test FlowchartGenerator raises error for invalid direction."""
+        with pytest.raises(ValueError) as excinfo:
+            FlowchartGenerator(direction="invalid")
+        assert "direction must be" in str(excinfo.value)
 
 
 class TestFlowchartGeneratorGenerate:
@@ -692,3 +722,265 @@ class TestFlowchartGeneratorEdgeCases:
         assert "A" in result
         assert "B" in result
         assert "C" in result
+
+
+class TestFlowchartGeneratorTitle:
+    """Tests for FlowchartGenerator title feature."""
+
+    def test_title_in_output(self):
+        """Test that title appears in output."""
+        gen = FlowchartGenerator(title="My Flowchart")
+        result = gen.generate("A -> B")
+        assert "My Flowchart" in result
+
+    def test_title_uses_double_line_border(self):
+        """Test that title uses double-line border characters."""
+        gen = FlowchartGenerator(title="Test Title")
+        result = gen.generate("A -> B")
+        assert BOX_CHARS_DOUBLE["top_left"] in result
+        assert BOX_CHARS_DOUBLE["top_right"] in result
+        assert BOX_CHARS_DOUBLE["bottom_left"] in result
+        assert BOX_CHARS_DOUBLE["bottom_right"] in result
+        assert BOX_CHARS_DOUBLE["horizontal"] in result
+        assert BOX_CHARS_DOUBLE["vertical"] in result
+
+    def test_title_override_in_generate(self):
+        """Test that title can be overridden in generate call."""
+        gen = FlowchartGenerator(title="Instance Title")
+        result = gen.generate("A -> B", title="Override Title")
+        assert "Override Title" in result
+        assert "Instance Title" not in result
+
+    def test_no_title_when_none(self):
+        """Test that no title banner appears when title is None."""
+        gen = FlowchartGenerator()
+        result = gen.generate("A -> B")
+        # Double-line characters should not appear
+        assert BOX_CHARS_DOUBLE["top_left"] not in result
+        assert BOX_CHARS_DOUBLE["vertical"] not in result
+
+    def test_title_with_long_text(self):
+        """Test title with long text."""
+        gen = FlowchartGenerator(title="This is a very long title for the flowchart")
+        result = gen.generate("A -> B")
+        assert "This is a very long title for the flowchart" in result
+
+    def test_title_above_flowchart(self):
+        """Test that title appears above the flowchart nodes."""
+        gen = FlowchartGenerator(title="Title")
+        result = gen.generate("A -> B")
+        lines = result.split("\n")
+
+        # Find the line with the title
+        title_line_idx = None
+        for i, line in enumerate(lines):
+            if "Title" in line:
+                title_line_idx = i
+                break
+
+        # Find the first line with node A
+        node_a_line_idx = None
+        for i, line in enumerate(lines):
+            if "A" in line and BOX_CHARS["vertical"] in line:
+                node_a_line_idx = i
+                break
+
+        # Title should be above the node
+        assert title_line_idx is not None
+        assert node_a_line_idx is not None
+        assert title_line_idx < node_a_line_idx
+
+
+class TestFlowchartGeneratorHorizontalMode:
+    """Tests for FlowchartGenerator horizontal (LR) flow mode."""
+
+    def test_horizontal_mode_generates_output(self):
+        """Test that horizontal mode generates valid output."""
+        gen = FlowchartGenerator(direction="LR")
+        result = gen.generate("A -> B\nB -> C")
+        assert "A" in result
+        assert "B" in result
+        assert "C" in result
+
+    def test_horizontal_mode_uses_right_arrows(self):
+        """Test that horizontal mode uses right arrows."""
+        gen = FlowchartGenerator(direction="LR")
+        result = gen.generate("A -> B")
+        assert ARROW_CHARS["right"] in result
+
+    def test_horizontal_mode_layout(self):
+        """Test that horizontal mode arranges nodes left to right."""
+        gen = FlowchartGenerator(direction="LR")
+        result = gen.generate("A -> B\nB -> C")
+        lines = result.split("\n")
+
+        # Find positions of A, B, C in the output
+        a_col = None
+        b_col = None
+        c_col = None
+
+        for line in lines:
+            if "A" in line and a_col is None:
+                a_col = line.index("A")
+            if "B" in line and b_col is None:
+                b_col = line.index("B")
+            if "C" in line and c_col is None:
+                c_col = line.index("C")
+
+        # In LR mode, A should be to the left of B, B to the left of C
+        assert a_col is not None
+        assert b_col is not None
+        assert c_col is not None
+        assert a_col < b_col < c_col
+
+    def test_horizontal_mode_with_branching(self):
+        """Test horizontal mode with branching flowchart."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = """
+        Start -> A
+        Start -> B
+        A -> End
+        B -> End
+        """
+        result = gen.generate(input_text)
+        assert "Start" in result
+        assert "A" in result
+        assert "B" in result
+        assert "End" in result
+
+    def test_horizontal_mode_with_cycles(self):
+        """Test horizontal mode with cyclic flowchart."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = """
+        A -> B
+        B -> C
+        C -> A
+        """
+        result = gen.generate(input_text)
+        assert "A" in result
+        assert "B" in result
+        assert "C" in result
+
+    def test_horizontal_mode_with_title(self):
+        """Test horizontal mode combined with title."""
+        gen = FlowchartGenerator(direction="LR", title="Horizontal Flow")
+        result = gen.generate("A -> B\nB -> C")
+        assert "Horizontal Flow" in result
+        assert BOX_CHARS_DOUBLE["top_left"] in result
+        assert ARROW_CHARS["right"] in result
+
+    def test_vertical_vs_horizontal_different_dimensions(self):
+        """Test that TB and LR modes produce different dimensions."""
+        gen_tb = FlowchartGenerator(direction="TB")
+        gen_lr = FlowchartGenerator(direction="LR")
+
+        input_text = "A -> B\nB -> C\nC -> D"
+        result_tb = gen_tb.generate(input_text)
+        result_lr = gen_lr.generate(input_text)
+
+        # Get dimensions
+        tb_lines = result_tb.split("\n")
+        lr_lines = result_lr.split("\n")
+        tb_height = len(tb_lines)
+        lr_height = len(lr_lines)
+        tb_width = max(len(line) for line in tb_lines)
+        lr_width = max(len(line) for line in lr_lines)
+
+        # TB should be taller and narrower, LR should be shorter and wider
+        assert tb_height > lr_height
+        assert lr_width > tb_width
+
+    def test_horizontal_mode_calculate_positions(self):
+        """Test _calculate_positions_horizontal method."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = "A -> B"
+        connections = gen.parser.parse(input_text)
+        layout_result = gen.layout_engine.layout(connections)
+        box_dimensions = gen._calculate_all_box_dimensions(layout_result)
+
+        positions = gen._calculate_positions_horizontal(
+            layout_result, box_dimensions, top_margin=0
+        )
+
+        assert "A" in positions
+        assert "B" in positions
+        # A should be to the left of B
+        assert positions["A"][0] < positions["B"][0]
+
+    def test_horizontal_mode_with_margin(self):
+        """Test _calculate_positions_horizontal with top margin."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = "A -> B"
+        connections = gen.parser.parse(input_text)
+        layout_result = gen.layout_engine.layout(connections)
+        box_dimensions = gen._calculate_all_box_dimensions(layout_result)
+
+        positions_no_margin = gen._calculate_positions_horizontal(
+            layout_result, box_dimensions, top_margin=0
+        )
+        positions_with_margin = gen._calculate_positions_horizontal(
+            layout_result, box_dimensions, top_margin=10
+        )
+
+        # With margin, y positions should be shifted down
+        for name in positions_no_margin:
+            assert positions_with_margin[name][1] >= positions_no_margin[name][1]
+
+    def test_calculate_port_y_single(self):
+        """Test _calculate_port_y for single port."""
+        gen = FlowchartGenerator(direction="LR")
+        box_y = 10
+        box_height = 20
+
+        port_y = gen._calculate_port_y(box_y, box_height, 0, 1)
+
+        # Single port should be centered
+        expected_center = box_y + box_height // 2
+        assert port_y == expected_center
+
+    def test_calculate_port_y_multiple(self):
+        """Test _calculate_port_y for multiple ports."""
+        gen = FlowchartGenerator(direction="LR")
+        box_y = 10
+        box_height = 20
+
+        port_y_0 = gen._calculate_port_y(box_y, box_height, 0, 3)
+        port_y_1 = gen._calculate_port_y(box_y, box_height, 1, 3)
+        port_y_2 = gen._calculate_port_y(box_y, box_height, 2, 3)
+
+        # Ports should be distributed vertically
+        assert port_y_0 < port_y_1 < port_y_2
+
+    def test_horizontal_back_edges(self):
+        """Test that back edges work in horizontal mode."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = """
+        Init -> Process
+        Process -> Check
+        Check -> Process
+        Check -> Done
+        """
+        result = gen.generate(input_text)
+        assert "Init" in result
+        assert "Process" in result
+        assert "Check" in result
+        assert "Done" in result
+
+    def test_horizontal_wide_branching(self):
+        """Test horizontal mode with wide branching."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = """
+        Start -> A
+        Start -> B
+        Start -> C
+        Start -> D
+        A -> End
+        B -> End
+        C -> End
+        D -> End
+        """
+        result = gen.generate(input_text)
+        assert "Start" in result
+        assert "End" in result
+        for node in ["A", "B", "C", "D"]:
+            assert node in result

@@ -13,6 +13,15 @@ example_linear.txt
 example_microservice.txt
 example_pipeline.txt
 example_workflow.txt
+
+example_cicd_LR.txt
+example_error_handling_title_LR.txt
+example_linear_LR.txt
+example_long.txt
+example_microservice_LR.txt
+example_microservice_with_title.txt
+example_pipeline_with_title.txt
+
 good_ascii_diagram_1
 good_ascii_diagram_2
 

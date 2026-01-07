@@ -3,11 +3,13 @@
 from retroflow.renderer import (
     ARROW_CHARS,
     BOX_CHARS,
+    BOX_CHARS_DOUBLE,
     LINE_CHARS,
     BoxDimensions,
     BoxRenderer,
     Canvas,
     LineRenderer,
+    TitleRenderer,
 )
 
 
@@ -399,3 +401,140 @@ class TestCharacterConstants:
             assert len(char) == 1
         for char in LINE_CHARS.values():
             assert len(char) == 1
+
+    def test_box_chars_double_complete(self):
+        """Test BOX_CHARS_DOUBLE has all required keys."""
+        required = [
+            "top_left",
+            "top_right",
+            "bottom_left",
+            "bottom_right",
+            "horizontal",
+            "vertical",
+        ]
+        for key in required:
+            assert key in BOX_CHARS_DOUBLE
+
+    def test_box_chars_double_are_single_characters(self):
+        """Test all double-line characters are single character strings."""
+        for char in BOX_CHARS_DOUBLE.values():
+            assert len(char) == 1
+
+    def test_box_chars_double_are_different_from_single(self):
+        """Test double-line characters are different from single-line."""
+        assert BOX_CHARS_DOUBLE["top_left"] != BOX_CHARS["top_left"]
+        assert BOX_CHARS_DOUBLE["horizontal"] != BOX_CHARS["horizontal"]
+        assert BOX_CHARS_DOUBLE["vertical"] != BOX_CHARS["vertical"]
+
+
+class TestTitleRenderer:
+    """Tests for TitleRenderer class."""
+
+    def test_title_renderer_creation(self):
+        """Test TitleRenderer creation with defaults."""
+        tr = TitleRenderer()
+        assert tr is not None
+        assert tr.padding == 2
+        assert tr.box_chars == BOX_CHARS_DOUBLE
+
+    def test_title_renderer_custom_padding(self):
+        """Test TitleRenderer with custom padding."""
+        tr = TitleRenderer(padding=5)
+        assert tr.padding == 5
+
+    def test_calculate_title_dimensions_basic(self):
+        """Test calculating title dimensions."""
+        tr = TitleRenderer()
+        width, height = tr.calculate_title_dimensions("Hello")
+
+        # width = len("Hello") + 2*padding + 2 (borders) = 5 + 4 + 2 = 11
+        assert width == 11
+        # height is always 3 (top, text, bottom)
+        assert height == 3
+
+    def test_calculate_title_dimensions_min_width(self):
+        """Test that min_width is respected."""
+        tr = TitleRenderer()
+        width, height = tr.calculate_title_dimensions("Hi", min_width=20)
+
+        # Should use min_width since calculated width < min_width
+        assert width == 20
+        assert height == 3
+
+    def test_calculate_title_dimensions_longer_title(self):
+        """Test dimensions with longer title."""
+        tr = TitleRenderer()
+        title = "This is a longer title"
+        width, height = tr.calculate_title_dimensions(title)
+
+        # width = len(title) + 2*padding + 2
+        expected_width = len(title) + 2 * 2 + 2
+        assert width == expected_width
+        assert height == 3
+
+    def test_draw_title_corners(self, canvas):
+        """Test that title draws correct double-line corners."""
+        tr = TitleRenderer()
+        tr.draw_title(canvas, 0, 0, "Test", 12)
+
+        # Check corners
+        assert canvas.get(0, 0) == BOX_CHARS_DOUBLE["top_left"]
+        assert canvas.get(11, 0) == BOX_CHARS_DOUBLE["top_right"]
+        assert canvas.get(0, 2) == BOX_CHARS_DOUBLE["bottom_left"]
+        assert canvas.get(11, 2) == BOX_CHARS_DOUBLE["bottom_right"]
+
+    def test_draw_title_borders(self, canvas):
+        """Test that title draws correct horizontal borders."""
+        tr = TitleRenderer()
+        tr.draw_title(canvas, 0, 0, "Test", 12)
+
+        # Check horizontal borders (between corners)
+        assert canvas.get(1, 0) == BOX_CHARS_DOUBLE["horizontal"]
+        assert canvas.get(1, 2) == BOX_CHARS_DOUBLE["horizontal"]
+
+    def test_draw_title_sides(self, canvas):
+        """Test that title draws correct vertical sides."""
+        tr = TitleRenderer()
+        tr.draw_title(canvas, 0, 0, "Test", 12)
+
+        # Check vertical sides (middle row)
+        assert canvas.get(0, 1) == BOX_CHARS_DOUBLE["vertical"]
+        assert canvas.get(11, 1) == BOX_CHARS_DOUBLE["vertical"]
+
+    def test_draw_title_text_present(self, canvas):
+        """Test that title text is drawn."""
+        tr = TitleRenderer()
+        tr.draw_title(canvas, 0, 0, "Hello", 15)
+
+        rendered = canvas.render()
+        assert "Hello" in rendered
+
+    def test_draw_title_returns_height(self, canvas):
+        """Test that draw_title returns correct height."""
+        tr = TitleRenderer()
+        height = tr.draw_title(canvas, 0, 0, "Test", 12)
+
+        assert height == 3
+
+    def test_draw_title_at_offset(self, canvas):
+        """Test drawing title at non-zero position."""
+        tr = TitleRenderer()
+        tr.draw_title(canvas, 5, 3, "Test", 12)
+
+        # Corners should be at offset position
+        assert canvas.get(5, 3) == BOX_CHARS_DOUBLE["top_left"]
+        assert canvas.get(16, 3) == BOX_CHARS_DOUBLE["top_right"]
+        assert canvas.get(5, 5) == BOX_CHARS_DOUBLE["bottom_left"]
+        assert canvas.get(16, 5) == BOX_CHARS_DOUBLE["bottom_right"]
+
+    def test_draw_title_text_centered(self, canvas):
+        """Test that title text is centered in the box."""
+        tr = TitleRenderer()
+        width = 20
+        title = "Hi"
+        tr.draw_title(canvas, 0, 0, title, width)
+
+        # Text should be centered: position = (width - len(title)) // 2 = 9
+        expected_x = (width - len(title)) // 2
+        assert canvas.get(expected_x, 1) == "H"
+        assert canvas.get(expected_x + 1, 1) == "i"
