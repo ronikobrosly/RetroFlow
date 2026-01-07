@@ -18,8 +18,10 @@ class TestFlowchartGeneratorInit:
         assert gen.max_text_width == 22
         assert gen.min_box_width == 10
         assert gen.horizontal_spacing == 12
-        assert gen.vertical_spacing == 6
+        assert gen.vertical_spacing == 3
         assert gen.shadow is True
+        assert gen.rounded is False
+        assert gen.compact is False
         assert gen.font is None
 
     def test_custom_max_text_width(self):
@@ -46,6 +48,16 @@ class TestFlowchartGeneratorInit:
         """Test FlowchartGenerator with shadow disabled."""
         gen = FlowchartGenerator(shadow=False)
         assert gen.shadow is False
+
+    def test_rounded_corners_enabled(self):
+        """Test FlowchartGenerator with rounded corners enabled."""
+        gen = FlowchartGenerator(rounded=True)
+        assert gen.rounded is True
+
+    def test_compact_mode_enabled(self):
+        """Test FlowchartGenerator with compact mode enabled."""
+        gen = FlowchartGenerator(compact=True)
+        assert gen.compact is True
 
     def test_custom_font(self):
         """Test FlowchartGenerator with custom font."""
@@ -115,6 +127,31 @@ class TestFlowchartGeneratorGenerate:
         gen = FlowchartGenerator(shadow=False)
         result = gen.generate(simple_input)
         assert BOX_CHARS["shadow"] not in result
+
+    def test_generate_with_rounded_corners(self, simple_input):
+        """Test generating with rounded corners."""
+        from retroflow.renderer import BOX_CHARS_ROUNDED
+
+        gen = FlowchartGenerator(rounded=True)
+        result = gen.generate(simple_input)
+        # Should contain rounded corner characters
+        assert BOX_CHARS_ROUNDED["top_left"] in result
+        assert BOX_CHARS_ROUNDED["top_right"] in result
+        # Should NOT contain square corner characters
+        assert BOX_CHARS["top_left"] not in result
+
+    def test_generate_with_compact_mode(self, simple_input):
+        """Test generating with compact mode produces smaller output."""
+        gen_normal = FlowchartGenerator()
+        gen_compact = FlowchartGenerator(compact=True)
+
+        result_normal = gen_normal.generate(simple_input)
+        result_compact = gen_compact.generate(simple_input)
+
+        # Compact mode should produce fewer lines
+        lines_normal = result_normal.count("\n")
+        lines_compact = result_compact.count("\n")
+        assert lines_compact < lines_normal
 
     def test_generate_branching(self, generator, branching_input):
         """Test generating branching flowchart."""

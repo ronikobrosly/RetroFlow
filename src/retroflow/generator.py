@@ -52,8 +52,10 @@ class FlowchartGenerator:
         max_text_width: int = 22,
         min_box_width: int = 10,
         horizontal_spacing: int = 12,
-        vertical_spacing: int = 6,
+        vertical_spacing: int = 3,
         shadow: bool = True,
+        rounded: bool = False,
+        compact: bool = False,
         font: Optional[str] = None,
     ):
         """
@@ -65,6 +67,8 @@ class FlowchartGenerator:
             horizontal_spacing: Space between boxes horizontally
             vertical_spacing: Space between boxes vertically
             shadow: Whether to draw box shadows
+            rounded: Whether to use rounded corners (╭╮╯╰) instead of square
+            compact: Whether to use compact boxes (no vertical padding)
             font: Font name for PNG output (e.g., "Cascadia Code", "Monaco")
         """
         self.max_text_width = max_text_width
@@ -72,11 +76,18 @@ class FlowchartGenerator:
         self.horizontal_spacing = horizontal_spacing
         self.vertical_spacing = vertical_spacing
         self.shadow = shadow
+        self.rounded = rounded
+        self.compact = compact
         self.font = font
 
         self.parser = Parser()
         self.layout_engine = NetworkXLayout()
-        self.box_renderer = BoxRenderer(max_text_width=max_text_width, shadow=shadow)
+        self.box_renderer = BoxRenderer(
+            max_text_width=max_text_width,
+            shadow=shadow,
+            rounded=rounded,
+            compact=compact,
+        )
 
     def generate(self, input_text: str) -> str:
         """

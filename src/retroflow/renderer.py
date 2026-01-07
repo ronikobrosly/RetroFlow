@@ -19,6 +19,17 @@ BOX_CHARS = {
     "shadow": "░",
 }
 
+# Rounded corner variants
+BOX_CHARS_ROUNDED = {
+    "top_left": "╭",
+    "top_right": "╮",
+    "bottom_left": "╰",
+    "bottom_right": "╯",
+    "horizontal": "─",
+    "vertical": "│",
+    "shadow": "░",
+}
+
 # Arrow characters
 ARROW_CHARS = {
     "down": "▼",
@@ -100,10 +111,20 @@ class BoxRenderer:
     Renders boxes with shadows and wrapped text.
     """
 
-    def __init__(self, max_text_width: int = 20, padding: int = 2, shadow: bool = True):
+    def __init__(
+        self,
+        max_text_width: int = 20,
+        padding: int = 2,
+        shadow: bool = True,
+        rounded: bool = False,
+        compact: bool = False,
+    ):
         self.max_text_width = max_text_width
         self.padding = padding
         self.shadow = shadow
+        self.rounded = rounded
+        self.compact = compact
+        self.box_chars = BOX_CHARS_ROUNDED if rounded else BOX_CHARS
 
     def calculate_box_dimensions(self, text: str) -> BoxDimensions:
         """
@@ -141,8 +162,13 @@ class BoxRenderer:
         # Box width = text_width + 2*padding + 2 (for borders)
         box_width = text_width + 2 * self.padding + 2
 
-        # Box height = num_lines + 2 (for borders) + 2 (for vertical padding)
-        box_height = len(lines) + 4
+        # Box height = num_lines + 2 (for borders) + vertical padding
+        # Compact mode: no vertical padding (height = lines + 2)
+        # Normal mode: 1 line padding top and bottom (height = lines + 4)
+        if self.compact:
+            box_height = len(lines) + 2
+        else:
+            box_height = len(lines) + 4
 
         return BoxDimensions(
             width=box_width, height=box_height, text_lines=lines, padding=self.padding
@@ -162,40 +188,44 @@ class BoxRenderer:
         """
         w = dimensions.width
         h = dimensions.height
+        chars = self.box_chars
 
         # Draw top border (no shadow on top row)
-        canvas.set(x, y, BOX_CHARS["top_left"])
+        canvas.set(x, y, chars["top_left"])
         for i in range(1, w - 1):
-            canvas.set(x + i, y, BOX_CHARS["horizontal"])
-        canvas.set(x + w - 1, y, BOX_CHARS["top_right"])
+            canvas.set(x + i, y, chars["horizontal"])
+        canvas.set(x + w - 1, y, chars["top_right"])
 
         # Draw sides and content
         for row in range(1, h - 1):
-            canvas.set(x, y + row, BOX_CHARS["vertical"])
-            canvas.set(x + w - 1, y + row, BOX_CHARS["vertical"])
+            canvas.set(x, y + row, chars["vertical"])
+            canvas.set(x + w - 1, y + row, chars["vertical"])
 
             # Draw shadow on right side (content rows only)
             if self.shadow:
-                canvas.set(x + w, y + row, BOX_CHARS["shadow"])
+                canvas.set(x + w, y + row, chars["shadow"])
 
         # Draw bottom border
-        canvas.set(x, y + h - 1, BOX_CHARS["bottom_left"])
+        canvas.set(x, y + h - 1, chars["bottom_left"])
         for i in range(1, w - 1):
-            canvas.set(x + i, y + h - 1, BOX_CHARS["horizontal"])
-        canvas.set(x + w - 1, y + h - 1, BOX_CHARS["bottom_right"])
+            canvas.set(x + i, y + h - 1, chars["horizontal"])
+        canvas.set(x + w - 1, y + h - 1, chars["bottom_right"])
 
         # Draw shadow on right side of bottom border
         if self.shadow:
-            canvas.set(x + w, y + h - 1, BOX_CHARS["shadow"])
+            canvas.set(x + w, y + h - 1, chars["shadow"])
 
         # Draw bottom shadow (offset by 1 to align under content, not under left border)
         if self.shadow:
             for i in range(1, w + 1):
-                canvas.set(x + i, y + h, BOX_CHARS["shadow"])
+                canvas.set(x + i, y + h, chars["shadow"])
 
-        # Draw text (centered, with 1 line vertical padding)
+        # Draw text (centered)
+        # Compact mode: text starts at row 1 (right after top border)
+        # Normal mode: text starts at row 2 (1 line vertical padding)
+        text_start_y = y + 1 if self.compact else y + 2
         for line_idx, line in enumerate(dimensions.text_lines):
-            text_y = y + 2 + line_idx
+            text_y = text_start_y + line_idx
             # Center the text within the box
             available_width = w - 2  # Minus borders
             text_x = x + 1 + (available_width - len(line)) // 2

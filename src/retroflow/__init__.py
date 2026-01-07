@@ -16,10 +16,10 @@ Example:
 from .generator import FlowchartGenerator
 from .layout import LayoutResult, NodeLayout, SugiyamaLayout
 from .parser import ParseError, Parser, parse_flowchart
-from .renderer import BoxRenderer, Canvas, LineRenderer
+from .renderer import BOX_CHARS_ROUNDED, BoxRenderer, Canvas, LineRenderer
 from .router import BoxInfo, EdgeRoute, EdgeRouter
 
-__version__ = "0.4.4"
+__version__ = "0.5.0"
 
 __all__ = [
     "FlowchartGenerator",
@@ -31,6 +31,7 @@ __all__ = [
     "NodeLayout",
     "Canvas",
     "BoxRenderer",
+    "BOX_CHARS_ROUNDED",
     "LineRenderer",
     "EdgeRouter",
     "EdgeRoute",
