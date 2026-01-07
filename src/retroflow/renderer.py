@@ -237,7 +237,7 @@ class LineRenderer:
                 canvas.set(x, y, LINE_CHARS["tee_left"])
             elif current in (ARROW_CHARS["down"], ARROW_CHARS["up"]):
                 pass  # Don't overwrite arrows
-            elif current == " " or current == LINE_CHARS["vertical"]:
+            elif current in (" ", LINE_CHARS["vertical"], BOX_CHARS["shadow"]):
                 canvas.set(x, y, LINE_CHARS["vertical"])
 
         # Draw arrow at end
@@ -274,7 +274,7 @@ class LineRenderer:
                 canvas.set(x, y, LINE_CHARS["tee_up"])
             elif current in (ARROW_CHARS["left"], ARROW_CHARS["right"]):
                 pass  # Don't overwrite arrows
-            elif current == " " or current == LINE_CHARS["horizontal"]:
+            elif current in (" ", LINE_CHARS["horizontal"], BOX_CHARS["shadow"]):
                 canvas.set(x, y, LINE_CHARS["horizontal"])
 
         # Draw arrow at end
@@ -289,7 +289,7 @@ class LineRenderer:
         """
         current = canvas.get(x, y)
 
-        if current == " ":
+        if current in (" ", BOX_CHARS["shadow"]):
             canvas.set(x, y, LINE_CHARS[f"corner_{corner_type}"])
         elif current == LINE_CHARS["horizontal"]:
             if "top" in corner_type:

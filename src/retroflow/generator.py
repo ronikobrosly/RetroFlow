@@ -470,16 +470,16 @@ class FlowchartGenerator:
         canvas.set(src_port_x, src_port_y, LINE_CHARS["tee_down"])
 
         # Calculate path
-        # Start below source (after shadow)
-        start_y = src_port_y + (2 if self.shadow else 1)
+        # Start below source (through shadow - arrow lines overwrite shadows)
+        start_y = src_port_y + 1
         # End at target top
         end_y = tgt_port_y
 
         if src_port_x == tgt_port_x:
-            # Direct vertical line
-            self._draw_vertical_line(canvas, src_port_x, start_y, end_y - 1)
-            # Draw arrow at target
-            canvas.set(tgt_port_x, tgt_port_y, ARROW_CHARS["down"])
+            # Direct vertical line (stop before arrow position)
+            self._draw_vertical_line(canvas, src_port_x, start_y, end_y - 2)
+            # Draw arrow one row above target box (doesn't overwrite border)
+            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
         else:
             # Need to route with horizontal segment
             mid_y = start_y + (end_y - start_y) // 2
@@ -502,11 +502,11 @@ class FlowchartGenerator:
             else:
                 canvas.set(tgt_port_x, mid_y, LINE_CHARS["corner_top_left"])
 
-            # Vertical from mid to target
-            self._draw_vertical_line(canvas, tgt_port_x, mid_y + 1, end_y - 1)
+            # Vertical from mid to target (stop before arrow position)
+            self._draw_vertical_line(canvas, tgt_port_x, mid_y + 1, end_y - 2)
 
-            # Draw arrow at target
-            canvas.set(tgt_port_x, tgt_port_y, ARROW_CHARS["down"])
+            # Draw arrow one row above target box (doesn't overwrite border)
+            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
 
     def _calculate_port_x(
         self, box_x: int, box_width: int, port_idx: int, port_count: int
@@ -658,8 +658,8 @@ class FlowchartGenerator:
                 canvas.set(route_x, entry_y, LINE_CHARS["corner_top_left"])
             # else leave existing corner/tee
 
-            # 8. Horizontal line from margin to target
-            for x in range(route_x + 1, entry_x):
+            # 8. Horizontal line from margin to target (stop before arrow position)
+            for x in range(route_x + 1, entry_x - 1):
                 current = canvas.get(x, entry_y)
                 if current == LINE_CHARS["vertical"]:
                     canvas.set(x, entry_y, LINE_CHARS["cross"])
@@ -669,5 +669,5 @@ class FlowchartGenerator:
                     canvas.set(x, entry_y, LINE_CHARS["horizontal"])
                 # else leave horizontal lines alone
 
-            # 9. Arrow at target entry point (on left border)
-            canvas.set(entry_x, entry_y, ARROW_CHARS["right"])
+            # 9. Arrow one column before target box (doesn't overwrite border)
+            canvas.set(entry_x - 1, entry_y, ARROW_CHARS["right"])
