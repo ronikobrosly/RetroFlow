@@ -5,6 +5,7 @@ Combines parsing, layout, and rendering to produce
 beautiful ASCII flowcharts.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -20,6 +21,17 @@ from .renderer import (
     BoxRenderer,
     Canvas,
 )
+
+
+@dataclass
+class LayerBoundary:
+    """Boundary information for a layer."""
+
+    layer_idx: int
+    top_y: int  # Top of layer (where boxes start)
+    bottom_y: int  # Bottom of layer (including shadow)
+    gap_start_y: int  # Start of gap below this layer
+    gap_end_y: int  # End of gap (start of next layer)
 
 
 class FlowchartGenerator:
@@ -91,6 +103,11 @@ class FlowchartGenerator:
             layout_result, box_dimensions, left_margin=back_edge_margin
         )
 
+        # Calculate layer boundaries for safe edge routing
+        layer_boundaries = self._calculate_layer_boundaries(
+            layout_result, box_dimensions
+        )
+
         # Calculate canvas size
         canvas_width, canvas_height = self._calculate_canvas_size(
             box_dimensions, box_positions
@@ -102,8 +119,10 @@ class FlowchartGenerator:
         # Draw boxes first
         self._draw_boxes(canvas, box_dimensions, box_positions, layout_result)
 
-        # Draw forward edges
-        self._draw_edges(canvas, layout_result, box_dimensions, box_positions)
+        # Draw forward edges with layer-aware routing
+        self._draw_edges(
+            canvas, layout_result, box_dimensions, box_positions, layer_boundaries
+        )
 
         # Draw back edges along the left margin
         if layout_result.back_edges:
@@ -339,6 +358,64 @@ class FlowchartGenerator:
 
         return positions
 
+    def _calculate_layer_boundaries(
+        self,
+        layout_result: LayoutResult,
+        box_dimensions: Dict[str, BoxDimensions],
+    ) -> List[LayerBoundary]:
+        """
+        Calculate the y-boundaries for each layer.
+
+        This information is used for safe edge routing - horizontal segments
+        should be placed in the gaps between layers where no boxes exist.
+
+        Returns:
+            List of LayerBoundary objects, one per layer
+        """
+        boundaries: List[LayerBoundary] = []
+
+        # Calculate layer heights (same logic as _calculate_positions)
+        layer_heights: List[int] = []
+        for layer in layout_result.layers:
+            max_height = 0
+            for node_name in layer:
+                dims = box_dimensions[node_name]
+                box_height = dims.height + (2 if self.shadow else 0)
+                max_height = max(max_height, box_height)
+            layer_heights.append(max_height)
+
+        # Calculate y positions for each layer
+        y_positions: List[int] = [0]
+        for height in layer_heights[:-1]:
+            y_positions.append(y_positions[-1] + height + self.vertical_spacing)
+
+        # Build boundary objects
+        num_layers = len(layout_result.layers)
+        for i in range(num_layers):
+            top_y = y_positions[i]
+            bottom_y = top_y + layer_heights[i] - 1  # -1 because it's inclusive
+
+            # Gap starts after the shadow (bottom_y is already inclusive of shadow)
+            gap_start_y = top_y + layer_heights[i]
+
+            # Gap ends at the start of the next layer (or canvas edge)
+            if i < num_layers - 1:
+                gap_end_y = y_positions[i + 1] - 1
+            else:
+                gap_end_y = gap_start_y + self.vertical_spacing  # Last layer
+
+            boundaries.append(
+                LayerBoundary(
+                    layer_idx=i,
+                    top_y=top_y,
+                    bottom_y=bottom_y,
+                    gap_start_y=gap_start_y,
+                    gap_end_y=gap_end_y,
+                )
+            )
+
+        return boundaries
+
     def _calculate_canvas_size(
         self,
         box_dimensions: Dict[str, BoxDimensions],
@@ -376,6 +453,7 @@ class FlowchartGenerator:
         layout_result: LayoutResult,
         box_dimensions: Dict[str, BoxDimensions],
         box_positions: Dict[str, Tuple[int, int]],
+        layer_boundaries: List[LayerBoundary],
     ) -> None:
         """Draw all forward edges on the canvas (skip back edges)."""
 
@@ -431,6 +509,8 @@ class FlowchartGenerator:
                 box_positions,
                 edges_from.get(source, []),
                 edges_to.get(target, []),
+                layer_boundaries,
+                src_layer,
             )
 
     def _draw_edge(
@@ -442,8 +522,10 @@ class FlowchartGenerator:
         box_positions: Dict[str, Tuple[int, int]],
         source_targets: List[str],
         target_sources: List[str],
+        layer_boundaries: List[LayerBoundary],
+        src_layer: int,
     ) -> None:
-        """Draw a single edge from source to target."""
+        """Draw a single edge from source to target with layer-aware routing."""
         src_dims = box_dimensions[source]
         tgt_dims = box_dimensions[target]
         src_x, src_y = box_positions[source]
@@ -482,7 +564,9 @@ class FlowchartGenerator:
             canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
         else:
             # Need to route with horizontal segment
-            mid_y = start_y + (end_y - start_y) // 2
+            # Use layer-aware routing: place horizontal segment in the gap zone
+            # below the source layer where no boxes can exist
+            mid_y = self._get_safe_horizontal_y(layer_boundaries, src_layer, start_y)
 
             # Vertical from source to mid
             self._draw_vertical_line(canvas, src_port_x, start_y, mid_y - 1)
@@ -507,6 +591,36 @@ class FlowchartGenerator:
 
             # Draw arrow one row above target box (doesn't overwrite border)
             canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
+
+    def _get_safe_horizontal_y(
+        self,
+        layer_boundaries: List[LayerBoundary],
+        src_layer: int,
+        start_y: int,
+    ) -> int:
+        """
+        Get a safe y-coordinate for horizontal edge routing.
+
+        Places the horizontal segment in the gap zone below the source layer,
+        ensuring it doesn't pass through any boxes.
+
+        Args:
+            layer_boundaries: List of layer boundary information
+            src_layer: The layer index of the source node
+            start_y: The y-coordinate where the edge starts (below source box)
+
+        Returns:
+            A y-coordinate in the gap zone that's safe for horizontal routing
+        """
+        if src_layer < len(layer_boundaries):
+            boundary = layer_boundaries[src_layer]
+            # Place horizontal line in the middle of the gap zone
+            gap_middle = (boundary.gap_start_y + boundary.gap_end_y) // 2
+            # Ensure we're at least at start_y (below the source shadow)
+            return max(gap_middle, start_y + 1)
+        else:
+            # Fallback: just below the start
+            return start_y + 2
 
     def _calculate_port_x(
         self, box_x: int, box_width: int, port_idx: int, port_count: int

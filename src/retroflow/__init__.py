@@ -19,7 +19,7 @@ from .parser import ParseError, Parser, parse_flowchart
 from .renderer import BoxRenderer, Canvas, LineRenderer
 from .router import BoxInfo, EdgeRoute, EdgeRouter
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 __all__ = [
     "FlowchartGenerator",
