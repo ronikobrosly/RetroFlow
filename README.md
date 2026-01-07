@@ -94,9 +94,10 @@ print(flowchart)
 
 - **Simple syntax**: Define flowcharts using intuitive `A -> B` arrow notation
 - **ASCII output**: Generate text-based flowcharts for terminals and documentation
+- **PNG export**: Save high-resolution PNG images with customizable fonts
 - **Intelligent layout**: Automatic node positioning using NetworkX with barycenter heuristic
 - **Cycle detection**: Handles cyclic graphs gracefully with back-edge routing
-- **Customizable**: Adjust text width, box sizes, spacing, and shadows
+- **Customizable**: Adjust text width, box sizes, spacing, shadows, and fonts
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
 
 ## Usage
@@ -155,6 +156,32 @@ generator.save_txt("""
 """, "flowchart.txt")
 ```
 
+### Export to PNG
+
+Save your flowchart as a high-resolution PNG image:
+
+```python
+generator = FlowchartGenerator()
+
+generator.save_png("""
+    A -> B
+    B -> C
+""", "flowchart.png")
+```
+
+Customize the PNG output with various options:
+
+```python
+generator.save_png(
+    "A -> B\nB -> C",
+    "flowchart.png",
+    font_size=24,           # Larger font = higher resolution (default: 16)
+    bg_color="#1a1a2e",     # Background color (default: "#FFFFFF")
+    fg_color="#00ff00",     # Text color (default: "#000000")
+    padding=40,             # Padding around diagram in pixels (default: 20)
+)
+```
+
 ## Configuration
 
 ### FlowchartGenerator Options
@@ -165,9 +192,30 @@ generator = FlowchartGenerator(
     min_box_width=10,       # Minimum box width (default: 10)
     horizontal_spacing=12,  # Space between boxes horizontally (default: 12)
     vertical_spacing=6,     # Space between boxes vertically (default: 6)
-    shadow=True             # Whether to draw box shadows (default: True)
+    shadow=True,            # Whether to draw box shadows (default: True)
+    font="Cascadia Code",   # Font for PNG output (default: None, uses system font)
 )
 ```
+
+### Font Configuration
+
+You can specify a font for PNG output either at initialization or per-call:
+
+```python
+# Set font for all PNG exports from this generator
+generator = FlowchartGenerator(font="Cascadia Code")
+generator.save_png("A -> B", "flowchart.png")
+
+# Or override the font for a specific export
+generator.save_png("A -> B", "flowchart.png", font="Monaco")
+```
+
+Common monospace fonts that work well:
+- **Windows**: `Cascadia Code`, `Consolas`, `Courier New`
+- **macOS**: `Monaco`, `Menlo`, `SF Mono`
+- **Linux**: `DejaVu Sans Mono`, `Ubuntu Mono`, `Liberation Mono`
+
+If the specified font isn't found, RetroFlow automatically falls back to available system fonts.
 
 ## Input Format
 
@@ -203,6 +251,7 @@ The main class for generating flowcharts.
 |--------|-------------|
 | `generate(input_text)` | Generate ASCII flowchart string |
 | `save_txt(input_text, filename)` | Save flowchart to a text file |
+| `save_png(input_text, filename, ...)` | Save flowchart as a PNG image |
 
 ### Convenience Functions
 

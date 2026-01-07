@@ -3,6 +3,8 @@
 import os
 import tempfile
 
+from PIL import Image
+
 from retroflow.generator import FlowchartGenerator
 from retroflow.renderer import ARROW_CHARS, BOX_CHARS
 
@@ -18,6 +20,7 @@ class TestFlowchartGeneratorInit:
         assert gen.horizontal_spacing == 12
         assert gen.vertical_spacing == 6
         assert gen.shadow is True
+        assert gen.font is None
 
     def test_custom_max_text_width(self):
         """Test FlowchartGenerator with custom max_text_width."""
@@ -43,6 +46,11 @@ class TestFlowchartGeneratorInit:
         """Test FlowchartGenerator with shadow disabled."""
         gen = FlowchartGenerator(shadow=False)
         assert gen.shadow is False
+
+    def test_custom_font(self):
+        """Test FlowchartGenerator with custom font."""
+        gen = FlowchartGenerator(font="Cascadia Code")
+        assert gen.font == "Cascadia Code"
 
     def test_all_custom_parameters(self):
         """Test FlowchartGenerator with all custom parameters."""
@@ -223,6 +231,245 @@ class TestFlowchartGeneratorSaveTxt:
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
+
+
+class TestFlowchartGeneratorSavePng:
+    """Tests for FlowchartGenerator.save_png method."""
+
+    def test_save_png_creates_file(self, generator, simple_input):
+        """Test that save_png creates a file."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            generator.save_png(simple_input, filename)
+            assert os.path.exists(filename)
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_creates_valid_image(self, generator, simple_input):
+        """Test that save_png creates a valid PNG image."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            generator.save_png(simple_input, filename)
+            # Should be openable as a valid image
+            img = Image.open(filename)
+            assert img.format == "PNG"
+            assert img.mode == "RGB"
+            assert img.width > 0
+            assert img.height > 0
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_custom_font_size(self, generator, simple_input):
+        """Test that larger font_size produces larger image."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename_small = f.name
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename_large = f.name
+
+        try:
+            generator.save_png(simple_input, filename_small, font_size=12)
+            generator.save_png(simple_input, filename_large, font_size=24)
+
+            img_small = Image.open(filename_small)
+            img_large = Image.open(filename_large)
+
+            # Larger font should produce larger image
+            assert img_large.width > img_small.width
+            assert img_large.height > img_small.height
+        finally:
+            for fn in [filename_small, filename_large]:
+                if os.path.exists(fn):
+                    os.remove(fn)
+
+    def test_save_png_custom_colors(self, generator, simple_input):
+        """Test save_png with custom background and foreground colors."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            generator.save_png(
+                simple_input,
+                filename,
+                bg_color="#000000",
+                fg_color="#00FF00",
+            )
+            img = Image.open(filename)
+            # Check that image was created with correct format
+            assert img.format == "PNG"
+            assert img.mode == "RGB"
+
+            # Check corners are the background color (black)
+            pixels = img.load()
+            # Top-left corner should be background color
+            assert pixels[0, 0] == (0, 0, 0)
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_custom_padding(self, generator, simple_input):
+        """Test that larger padding produces larger image."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename_small = f.name
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename_large = f.name
+
+        try:
+            generator.save_png(simple_input, filename_small, padding=10)
+            generator.save_png(simple_input, filename_large, padding=50)
+
+            img_small = Image.open(filename_small)
+            img_large = Image.open(filename_large)
+
+            # Larger padding should produce larger image
+            assert img_large.width > img_small.width
+            assert img_large.height > img_small.height
+        finally:
+            for fn in [filename_small, filename_large]:
+                if os.path.exists(fn):
+                    os.remove(fn)
+
+    def test_save_png_with_invalid_font(self, generator, simple_input):
+        """Test that invalid font name falls back gracefully."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            # Should not raise, should fall back to system/default font
+            generator.save_png(
+                simple_input,
+                filename,
+                font="NonexistentFontName12345",
+            )
+            assert os.path.exists(filename)
+            img = Image.open(filename)
+            assert img.format == "PNG"
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_with_instance_font(self, simple_input):
+        """Test that instance font is used when set."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            # Create generator with font specified
+            gen = FlowchartGenerator(font="DejaVu Sans Mono")
+            gen.save_png(simple_input, filename)
+            assert os.path.exists(filename)
+            img = Image.open(filename)
+            assert img.format == "PNG"
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_overwrites_existing(self, generator, simple_input):
+        """Test that save_png overwrites existing file."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+            # Write some dummy data
+            f.write(b"dummy content")
+
+        try:
+            generator.save_png(simple_input, filename)
+            # File should now be a valid PNG, not the dummy content
+            img = Image.open(filename)
+            assert img.format == "PNG"
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_with_branching(self, generator, branching_input):
+        """Test save_png with branching flowchart."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            generator.save_png(branching_input, filename)
+            img = Image.open(filename)
+            assert img.format == "PNG"
+            # Branching flowchart should be wider
+            assert img.width > 100
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_with_cyclic(self, generator, cyclic_input):
+        """Test save_png with cyclic flowchart."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            generator.save_png(cyclic_input, filename)
+            img = Image.open(filename)
+            assert img.format == "PNG"
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_save_png_minimum_dimensions(self, generator):
+        """Test that save_png enforces minimum image dimensions."""
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            # Very simple input
+            generator.save_png("A -> B", filename, font_size=8, padding=5)
+            img = Image.open(filename)
+            # Should enforce minimum dimensions
+            assert img.width >= 100
+            assert img.height >= 100
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+
+class TestFlowchartGeneratorLoadFont:
+    """Tests for FlowchartGenerator._load_monospace_font method."""
+
+    def test_load_font_returns_font(self, generator):
+        """Test that _load_monospace_font returns a font object."""
+        font = generator._load_monospace_font(16)
+        assert font is not None
+        # Should be able to get bounding box
+        bbox = font.getbbox("M")
+        assert bbox is not None
+        assert len(bbox) == 4
+
+    def test_load_font_respects_size(self, generator):
+        """Test that different font sizes produce different bbox sizes."""
+        font_small = generator._load_monospace_font(12)
+        font_large = generator._load_monospace_font(24)
+
+        bbox_small = font_small.getbbox("M")
+        bbox_large = font_large.getbbox("M")
+
+        # Larger font should have larger bounding box
+        small_width = bbox_small[2] - bbox_small[0]
+        large_width = bbox_large[2] - bbox_large[0]
+        assert large_width > small_width
+
+    def test_load_font_with_invalid_name(self, generator):
+        """Test that invalid font name falls through to system fonts."""
+        font = generator._load_monospace_font(16, "NonexistentFont12345")
+        assert font is not None
+        # Should still be usable
+        bbox = font.getbbox("M")
+        assert bbox is not None
+
+    def test_load_font_with_valid_name(self, generator):
+        """Test loading font by name."""
+        # Try a font that should exist on most systems
+        font = generator._load_monospace_font(16, "DejaVu Sans Mono")
+        assert font is not None
+        bbox = font.getbbox("M")
+        assert bbox is not None
 
 
 class TestFlowchartGeneratorInternalMethods:

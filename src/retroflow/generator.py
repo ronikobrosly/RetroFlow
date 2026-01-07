@@ -6,7 +6,9 @@ beautiful ASCII flowcharts.
 """
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from PIL import Image, ImageDraw, ImageFont
 
 from .layout import LayoutResult, NetworkXLayout
 from .parser import Parser
@@ -40,6 +42,7 @@ class FlowchartGenerator:
         horizontal_spacing: int = 12,
         vertical_spacing: int = 6,
         shadow: bool = True,
+        font: Optional[str] = None,
     ):
         """
         Initialize the flowchart generator.
@@ -50,12 +53,14 @@ class FlowchartGenerator:
             horizontal_spacing: Space between boxes horizontally
             vertical_spacing: Space between boxes vertically
             shadow: Whether to draw box shadows
+            font: Font name for PNG output (e.g., "Cascadia Code", "Monaco")
         """
         self.max_text_width = max_text_width
         self.min_box_width = min_box_width
         self.horizontal_spacing = horizontal_spacing
         self.vertical_spacing = vertical_spacing
         self.shadow = shadow
+        self.font = font
 
         self.parser = Parser()
         self.layout_engine = NetworkXLayout()
@@ -120,6 +125,128 @@ class FlowchartGenerator:
         flowchart = self.generate(input_text)
         output_path = Path(filename)
         output_path.write_text(flowchart, encoding="utf-8")
+
+    def save_png(
+        self,
+        input_text: str,
+        filename: str,
+        font_size: int = 16,
+        bg_color: str = "#FFFFFF",
+        fg_color: str = "#000000",
+        padding: int = 20,
+        font: Optional[str] = None,
+    ) -> None:
+        """
+        Generate flowchart and save as a high-resolution PNG image.
+
+        The PNG rendering is faithful to the ASCII version, using a monospace
+        font to preserve the exact character layout and box-drawing characters.
+
+        Args:
+            input_text: Multi-line string with connections like "A -> B"
+            filename: Output filename (should end in .png)
+            font_size: Font size in points (higher = higher resolution)
+            bg_color: Background color as hex string (e.g., "#FFFFFF")
+            fg_color: Foreground/text color as hex string (e.g., "#000000")
+            padding: Padding around the diagram in pixels
+            font: Font name to use (overrides instance font if provided)
+
+        Example:
+            >>> generator = FlowchartGenerator(font="Cascadia Code")
+            >>> generator.save_png("A -> B -> C", "flowchart.png", font_size=24)
+        """
+        ascii_art = self.generate(input_text)
+        lines = ascii_art.split("\n")
+
+        # Use provided font, fall back to instance font, then system defaults
+        font_name = font or self.font
+        loaded_font = self._load_monospace_font(font_size, font_name)
+
+        # Calculate character dimensions using a reference character
+        bbox = loaded_font.getbbox("M")
+        char_width = bbox[2] - bbox[0]
+        char_height = bbox[3] - bbox[1]
+        line_height = int(char_height * 1.2)  # Add some line spacing
+
+        # Calculate image dimensions
+        max_line_len = max(len(line) for line in lines) if lines else 0
+        img_width = char_width * max_line_len + padding * 2
+        img_height = line_height * len(lines) + padding * 2
+
+        # Ensure minimum dimensions
+        img_width = max(img_width, 100)
+        img_height = max(img_height, 100)
+
+        # Create image and draw text
+        img = Image.new("RGB", (img_width, img_height), bg_color)
+        draw = ImageDraw.Draw(img)
+
+        y = padding
+        for line in lines:
+            draw.text((padding, y), line, font=loaded_font, fill=fg_color)
+            y += line_height
+
+        # Save the image
+        output_path = Path(filename)
+        img.save(output_path, "PNG")
+
+    def _load_monospace_font(
+        self, font_size: int, font_name: Optional[str] = None
+    ) -> ImageFont.FreeTypeFont:
+        """
+        Load a monospace font for PNG rendering.
+
+        Tries the following in order:
+        1. User-specified font name if provided
+        2. Common system monospace fonts
+        3. Pillow's default font
+
+        Args:
+            font_size: Font size in points
+            font_name: Optional font name (e.g., "Cascadia Code", "Monaco")
+
+        Returns:
+            A PIL ImageFont object
+        """
+        # Build list of fonts to try
+        fonts_to_try = []
+
+        # Add user-specified font first
+        if font_name:
+            fonts_to_try.append(font_name)
+
+        # Common monospace fonts across different systems
+        fonts_to_try.extend(
+            [
+                # Linux
+                "DejaVuSansMono",
+                "DejaVu Sans Mono",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                # macOS
+                "Monaco",
+                "Menlo",
+                "/System/Library/Fonts/Monaco.ttf",
+                "/System/Library/Fonts/Menlo.ttc",
+                # Windows
+                "Consolas",
+                "Cascadia Code",
+                "Courier New",
+                "C:/Windows/Fonts/consola.ttf",
+            ]
+        )
+
+        for font in fonts_to_try:
+            try:
+                return ImageFont.truetype(font, font_size)
+            except OSError:
+                continue
+
+        # Fall back to Pillow's default font
+        try:
+            return ImageFont.load_default(size=font_size)
+        except TypeError:
+            # Older Pillow versions don't support size parameter
+            return ImageFont.load_default()
 
     def _calculate_all_box_dimensions(
         self, layout_result: LayoutResult
