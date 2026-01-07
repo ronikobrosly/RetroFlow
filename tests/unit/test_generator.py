@@ -256,11 +256,11 @@ class TestFlowchartGeneratorSavePng:
         try:
             generator.save_png(simple_input, filename)
             # Should be openable as a valid image
-            img = Image.open(filename)
-            assert img.format == "PNG"
-            assert img.mode == "RGB"
-            assert img.width > 0
-            assert img.height > 0
+            with Image.open(filename) as img:
+                assert img.format == "PNG"
+                assert img.mode == "RGB"
+                assert img.width > 0
+                assert img.height > 0
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -276,12 +276,14 @@ class TestFlowchartGeneratorSavePng:
             generator.save_png(simple_input, filename_small, font_size=12)
             generator.save_png(simple_input, filename_large, font_size=24)
 
-            img_small = Image.open(filename_small)
-            img_large = Image.open(filename_large)
+            with Image.open(filename_small) as img_small:
+                small_width, small_height = img_small.width, img_small.height
+            with Image.open(filename_large) as img_large:
+                large_width, large_height = img_large.width, img_large.height
 
             # Larger font should produce larger image
-            assert img_large.width > img_small.width
-            assert img_large.height > img_small.height
+            assert large_width > small_width
+            assert large_height > small_height
         finally:
             for fn in [filename_small, filename_large]:
                 if os.path.exists(fn):
@@ -299,15 +301,15 @@ class TestFlowchartGeneratorSavePng:
                 bg_color="#000000",
                 fg_color="#00FF00",
             )
-            img = Image.open(filename)
-            # Check that image was created with correct format
-            assert img.format == "PNG"
-            assert img.mode == "RGB"
+            with Image.open(filename) as img:
+                # Check that image was created with correct format
+                assert img.format == "PNG"
+                assert img.mode == "RGB"
 
-            # Check corners are the background color (black)
-            pixels = img.load()
-            # Top-left corner should be background color
-            assert pixels[0, 0] == (0, 0, 0)
+                # Check corners are the background color (black)
+                pixels = img.load()
+                # Top-left corner should be background color
+                assert pixels[0, 0] == (0, 0, 0)
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -323,12 +325,14 @@ class TestFlowchartGeneratorSavePng:
             generator.save_png(simple_input, filename_small, padding=10)
             generator.save_png(simple_input, filename_large, padding=50)
 
-            img_small = Image.open(filename_small)
-            img_large = Image.open(filename_large)
+            with Image.open(filename_small) as img_small:
+                small_width, small_height = img_small.width, img_small.height
+            with Image.open(filename_large) as img_large:
+                large_width, large_height = img_large.width, img_large.height
 
             # Larger padding should produce larger image
-            assert img_large.width > img_small.width
-            assert img_large.height > img_small.height
+            assert large_width > small_width
+            assert large_height > small_height
         finally:
             for fn in [filename_small, filename_large]:
                 if os.path.exists(fn):
@@ -347,8 +351,8 @@ class TestFlowchartGeneratorSavePng:
                 font="NonexistentFontName12345",
             )
             assert os.path.exists(filename)
-            img = Image.open(filename)
-            assert img.format == "PNG"
+            with Image.open(filename) as img:
+                assert img.format == "PNG"
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -363,8 +367,8 @@ class TestFlowchartGeneratorSavePng:
             gen = FlowchartGenerator(font="DejaVu Sans Mono")
             gen.save_png(simple_input, filename)
             assert os.path.exists(filename)
-            img = Image.open(filename)
-            assert img.format == "PNG"
+            with Image.open(filename) as img:
+                assert img.format == "PNG"
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -379,8 +383,8 @@ class TestFlowchartGeneratorSavePng:
         try:
             generator.save_png(simple_input, filename)
             # File should now be a valid PNG, not the dummy content
-            img = Image.open(filename)
-            assert img.format == "PNG"
+            with Image.open(filename) as img:
+                assert img.format == "PNG"
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -392,10 +396,10 @@ class TestFlowchartGeneratorSavePng:
 
         try:
             generator.save_png(branching_input, filename)
-            img = Image.open(filename)
-            assert img.format == "PNG"
-            # Branching flowchart should be wider
-            assert img.width > 100
+            with Image.open(filename) as img:
+                assert img.format == "PNG"
+                # Branching flowchart should be wider
+                assert img.width > 100
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -407,8 +411,8 @@ class TestFlowchartGeneratorSavePng:
 
         try:
             generator.save_png(cyclic_input, filename)
-            img = Image.open(filename)
-            assert img.format == "PNG"
+            with Image.open(filename) as img:
+                assert img.format == "PNG"
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -421,10 +425,10 @@ class TestFlowchartGeneratorSavePng:
         try:
             # Very simple input
             generator.save_png("A -> B", filename, font_size=8, padding=5)
-            img = Image.open(filename)
-            # Should enforce minimum dimensions
-            assert img.width >= 100
-            assert img.height >= 100
+            with Image.open(filename) as img:
+                # Should enforce minimum dimensions
+                assert img.width >= 100
+                assert img.height >= 100
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
