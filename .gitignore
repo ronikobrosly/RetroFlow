@@ -3,7 +3,6 @@ __pycache__/
 *.py[codz]
 *$py.class
 
-*.png
 testing_retroflow.py
 testing_retroflow2.py
 example_auth.txt
