@@ -177,12 +177,15 @@ Customize the PNG output with various options:
 generator.save_png(
     "A -> B\nB -> C",
     "flowchart.png",
-    font_size=24,           # Larger font = higher resolution (default: 16)
+    font_size=24,           # Base font size in points (default: 16)
     bg_color="#1a1a2e",     # Background color (default: "#FFFFFF")
     fg_color="#00ff00",     # Text color (default: "#000000")
     padding=40,             # Padding around diagram in pixels (default: 20)
+    scale=2,                # Resolution multiplier for crisp output (default: 2)
 )
 ```
+
+The `scale` parameter controls the output resolution. With the default `scale=2`, images render at 2x resolution for crisp display on high-DPI/retina screens. Use `scale=1` for smaller file sizes, or `scale=3` for even sharper output.
 
 ## Configuration
 

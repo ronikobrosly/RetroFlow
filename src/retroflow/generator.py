@@ -247,6 +247,7 @@ class FlowchartGenerator:
         fg_color: str = "#000000",
         padding: int = 20,
         font: Optional[str] = None,
+        scale: int = 2,
     ) -> None:
         """
         Generate flowchart and save as a high-resolution PNG image.
@@ -262,6 +263,7 @@ class FlowchartGenerator:
             fg_color: Foreground/text color as hex string (e.g., "#000000")
             padding: Padding around the diagram in pixels
             font: Font name to use (overrides instance font if provided)
+            scale: Resolution multiplier for crisp output (default 2 for retina)
 
         Example:
             >>> generator = FlowchartGenerator(font="Cascadia Code")
@@ -272,7 +274,9 @@ class FlowchartGenerator:
 
         # Use provided font, fall back to instance font, then system defaults
         font_name = font or self.font
-        loaded_font = self._load_monospace_font(font_size, font_name)
+        # Apply scale multiplier to font size for higher resolution output
+        scaled_font_size = font_size * scale
+        loaded_font = self._load_monospace_font(scaled_font_size, font_name)
 
         # Calculate character dimensions using a reference character
         bbox = loaded_font.getbbox("M")
@@ -280,22 +284,25 @@ class FlowchartGenerator:
         char_height = bbox[3] - bbox[1]
         line_height = int(char_height * 1.2)  # Add some line spacing
 
+        # Scale padding to match resolution
+        scaled_padding = padding * scale
+
         # Calculate image dimensions
         max_line_len = max(len(line) for line in lines) if lines else 0
-        img_width = char_width * max_line_len + padding * 2
-        img_height = line_height * len(lines) + padding * 2
+        img_width = char_width * max_line_len + scaled_padding * 2
+        img_height = line_height * len(lines) + scaled_padding * 2
 
-        # Ensure minimum dimensions
-        img_width = max(img_width, 100)
-        img_height = max(img_height, 100)
+        # Ensure minimum dimensions (scaled)
+        img_width = max(img_width, 100 * scale)
+        img_height = max(img_height, 100 * scale)
 
         # Create image and draw text
         img = Image.new("RGB", (img_width, img_height), bg_color)
         draw = ImageDraw.Draw(img)
 
-        y = padding
+        y = scaled_padding
         for line in lines:
-            draw.text((padding, y), line, font=loaded_font, fill=fg_color)
+            draw.text((scaled_padding, y), line, font=loaded_font, fill=fg_color)
             y += line_height
 
         # Save the image

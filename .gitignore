@@ -5,6 +5,7 @@ __pycache__/
 
 *.png
 testing_retroflow.py
+testing_retroflow2.py
 example_auth.txt
 example_branching.txt
 example_cicd.txt
@@ -21,6 +22,8 @@ example_long.txt
 example_microservice_LR.txt
 example_microservice_with_title.txt
 example_pipeline_with_title.txt
+
+font_test.png
 
 good_ascii_diagram_1
 good_ascii_diagram_2
