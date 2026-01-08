@@ -1,6 +1,6 @@
 [project]
 name = "retroflow"
-version = "0.7.0"
+version = "0.8.0"
 description = "Generate beautiful ASCII and PNG flowcharts from simple text descriptions"
 authors = [{name = "Roni Kobrosly", email = "roni.kobrosly@gmail.com"}]
 readme = "README.md"

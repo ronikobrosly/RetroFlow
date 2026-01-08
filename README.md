@@ -96,10 +96,11 @@ print(flowchart)
 - **ASCII output**: Generate text-based flowcharts for terminals and documentation
 - **PNG export**: Save high-resolution PNG images with customizable fonts
 - **Intelligent layout**: Automatic node positioning using NetworkX with barycenter heuristic
+- **Smart edge routing**: Edges automatically route around intermediate boxes to avoid visual overlap
 - **Cycle detection**: Handles cyclic graphs gracefully with back-edge routing
 - **Customizable**: Adjust text width, box sizes, spacing, shadows, and fonts
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
-- **Title banners**: Optional double-line bordered titles above diagrams
+- **Title banners**: Optional double-line bordered titles with automatic word wrapping
 - **Horizontal flow**: Left-to-right layout mode for compact linear diagrams
 
 ## Usage
@@ -238,9 +239,9 @@ result = generator.generate("""
 
 Output:
 ```
-╔═════════════════════╗
-║   CI/CD Pipeline    ║
-╚═════════════════════╝
+╔══════════════════╗
+║  CI/CD Pipeline  ║
+╚══════════════════╝
 
     ┌─────────┐
     │  Build  │░
@@ -258,6 +259,20 @@ Output:
     │  Deploy  │░
     └──────────┘░
      ░░░░░░░░░░░░
+```
+
+**Title Wrapping**: Long titles automatically wrap at word boundaries (approximately every 15 characters) to keep the title box compact:
+
+```python
+generator = FlowchartGenerator(title="My Very Long Project Title Here")
+```
+
+```
+╔═════════════════╗
+║  My Very Long   ║
+║  Project Title  ║
+║      Here       ║
+╚═════════════════╝
 ```
 
 You can also override the title per-call:

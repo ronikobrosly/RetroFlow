@@ -28,6 +28,9 @@ font_test.png
 good_ascii_diagram_1
 good_ascii_diagram_2
 
+extensive_retroflow_testing.py
+
+test_*.txt
 # C extensions
 *.so
 

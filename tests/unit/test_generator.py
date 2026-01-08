@@ -760,10 +760,14 @@ class TestFlowchartGeneratorTitle:
         assert BOX_CHARS_DOUBLE["vertical"] not in result
 
     def test_title_with_long_text(self):
-        """Test title with long text."""
+        """Test title with long text wraps at word boundaries."""
         gen = FlowchartGenerator(title="This is a very long title for the flowchart")
         result = gen.generate("A -> B")
-        assert "This is a very long title for the flowchart" in result
+        # Title wraps at ~15 chars, so it should appear on multiple lines
+        # Check that key parts of the title are present (may be split across lines)
+        assert "This is a very" in result
+        assert "long title for" in result
+        assert "the flowchart" in result
 
     def test_title_above_flowchart(self):
         """Test that title appears above the flowchart nodes."""

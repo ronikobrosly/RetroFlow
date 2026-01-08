@@ -453,35 +453,39 @@ class TestTitleRenderer:
         assert height == 3
 
     def test_calculate_title_dimensions_min_width(self):
-        """Test that min_width is respected."""
+        """Test that title box sizes to content, ignoring min_width."""
         tr = TitleRenderer()
         width, height = tr.calculate_title_dimensions("Hi", min_width=20)
 
-        # Should use min_width since calculated width < min_width
-        assert width == 20
+        # min_width is now ignored - box sizes to fit content
+        # width = len("Hi") + 2*padding + 2 = 2 + 4 + 2 = 8
+        assert width == 8
         assert height == 3
 
     def test_calculate_title_dimensions_longer_title(self):
-        """Test dimensions with longer title."""
+        """Test dimensions with longer title that wraps."""
         tr = TitleRenderer()
         title = "This is a longer title"
         width, height = tr.calculate_title_dimensions(title)
 
-        # width = len(title) + 2*padding + 2
-        expected_width = len(title) + 2 * 2 + 2
-        assert width == expected_width
-        assert height == 3
+        # Title wraps at 15 chars: "This is a" (9), "longer title" (12)
+        # Max line width is 12, so width = 12 + 2*padding + 2 = 18
+        # height = 2 lines + 2 (borders) = 4
+        assert width == 18
+        assert height == 4
 
     def test_draw_title_corners(self, canvas):
         """Test that title draws correct double-line corners."""
         tr = TitleRenderer()
         tr.draw_title(canvas, 0, 0, "Test", 12)
 
-        # Check corners
+        # Title box is sized to content: "Test" = 4 chars
+        # width = 4 + 2*padding + 2 = 4 + 4 + 2 = 10
+        # So corners at 0 and 9
         assert canvas.get(0, 0) == BOX_CHARS_DOUBLE["top_left"]
-        assert canvas.get(11, 0) == BOX_CHARS_DOUBLE["top_right"]
+        assert canvas.get(9, 0) == BOX_CHARS_DOUBLE["top_right"]
         assert canvas.get(0, 2) == BOX_CHARS_DOUBLE["bottom_left"]
-        assert canvas.get(11, 2) == BOX_CHARS_DOUBLE["bottom_right"]
+        assert canvas.get(9, 2) == BOX_CHARS_DOUBLE["bottom_right"]
 
     def test_draw_title_borders(self, canvas):
         """Test that title draws correct horizontal borders."""
@@ -497,9 +501,9 @@ class TestTitleRenderer:
         tr = TitleRenderer()
         tr.draw_title(canvas, 0, 0, "Test", 12)
 
-        # Check vertical sides (middle row)
+        # Title box width = 10, so sides at 0 and 9
         assert canvas.get(0, 1) == BOX_CHARS_DOUBLE["vertical"]
-        assert canvas.get(11, 1) == BOX_CHARS_DOUBLE["vertical"]
+        assert canvas.get(9, 1) == BOX_CHARS_DOUBLE["vertical"]
 
     def test_draw_title_text_present(self, canvas):
         """Test that title text is drawn."""
@@ -521,20 +525,20 @@ class TestTitleRenderer:
         tr = TitleRenderer()
         tr.draw_title(canvas, 5, 3, "Test", 12)
 
-        # Corners should be at offset position
+        # Title box width = 10, corners at x=5 and x=14
         assert canvas.get(5, 3) == BOX_CHARS_DOUBLE["top_left"]
-        assert canvas.get(16, 3) == BOX_CHARS_DOUBLE["top_right"]
+        assert canvas.get(14, 3) == BOX_CHARS_DOUBLE["top_right"]
         assert canvas.get(5, 5) == BOX_CHARS_DOUBLE["bottom_left"]
-        assert canvas.get(16, 5) == BOX_CHARS_DOUBLE["bottom_right"]
+        assert canvas.get(14, 5) == BOX_CHARS_DOUBLE["bottom_right"]
 
     def test_draw_title_text_centered(self, canvas):
         """Test that title text is centered in the box."""
         tr = TitleRenderer()
-        width = 20
         title = "Hi"
-        tr.draw_title(canvas, 0, 0, title, width)
+        tr.draw_title(canvas, 0, 0, title, 20)  # width param is ignored
 
-        # Text should be centered: position = (width - len(title)) // 2 = 9
-        expected_x = (width - len(title)) // 2
-        assert canvas.get(expected_x, 1) == "H"
-        assert canvas.get(expected_x + 1, 1) == "i"
+        # Title box sizes to content: width = 2 + 4 + 2 = 8
+        # Text centered in width 8: available = 6, offset = (6-2)/2 = 2
+        # Text starts at x = 1 (border) + 2 (offset) = 3
+        assert canvas.get(3, 1) == "H"
+        assert canvas.get(4, 1) == "i"

@@ -137,7 +137,9 @@ class FlowchartGenerator:
         box_dimensions = self._calculate_all_box_dimensions(layout_result)
 
         # Calculate actual pixel positions - leave margin for back edges
-        back_edge_margin = 6 if layout_result.back_edges else 0
+        # Each back edge needs 3 chars of space, plus 4 for min line before arrow
+        num_back_edges = len(layout_result.back_edges)
+        back_edge_margin = (4 + num_back_edges * 3) if num_back_edges > 0 else 0
 
         if self.direction == "LR":
             box_positions = self._calculate_positions_horizontal(
@@ -168,29 +170,63 @@ class FlowchartGenerator:
         # Calculate title dimensions and offset
         title_height = 0
         title_width = 0
+        diagram_x_offset = 0
+        title_x_offset = 0
+
         if effective_title:
             title_width, title_height = self.title_renderer.calculate_title_dimensions(
-                effective_title, min_width=canvas_width
+                effective_title
             )
             title_height += 2  # Add spacing below title
-            canvas_width = max(canvas_width, title_width)
+
+            # Determine centering: center title above diagram or diagram under title
+            if title_width > canvas_width:
+                # Title is wider - center diagram under title
+                diagram_x_offset = (title_width - canvas_width) // 2
+                canvas_width = title_width
+            else:
+                # Diagram is wider - center title above diagram
+                title_x_offset = (canvas_width - title_width) // 2
 
         # Create canvas with padding and title space
         canvas = Canvas(canvas_width + 5, canvas_height + title_height + 5)
 
-        # Draw title if present
+        # Draw title if present, centered above the diagram
         if effective_title:
-            # Center the title
-            title_x = (canvas_width - title_width) // 2
             self.title_renderer.draw_title(
-                canvas, title_x, 0, effective_title, title_width
+                canvas, title_x_offset, 0, effective_title, title_width
             )
 
-        # Offset box positions for title
-        if title_height > 0:
+        # Offset box positions for title and centering
+        if title_height > 0 or diagram_x_offset > 0:
             box_positions = {
-                name: (x, y + title_height) for name, (x, y) in box_positions.items()
+                name: (x + diagram_x_offset, y + title_height)
+                for name, (x, y) in box_positions.items()
             }
+            # Also offset layer boundaries by title height
+            if title_height > 0:
+                layer_boundaries = [
+                    LayerBoundary(
+                        layer_idx=lb.layer_idx,
+                        top_y=lb.top_y + title_height,
+                        bottom_y=lb.bottom_y + title_height,
+                        gap_start_y=lb.gap_start_y + title_height,
+                        gap_end_y=lb.gap_end_y + title_height,
+                    )
+                    for lb in layer_boundaries
+                ]
+                # And column boundaries for LR mode
+                if self.direction == "LR" and diagram_x_offset > 0:
+                    column_boundaries = [
+                        ColumnBoundary(
+                            layer_idx=cb.layer_idx,
+                            left_x=cb.left_x + diagram_x_offset,
+                            right_x=cb.right_x + diagram_x_offset,
+                            gap_start_x=cb.gap_start_x + diagram_x_offset,
+                            gap_end_x=cb.gap_end_x + diagram_x_offset,
+                        )
+                        for cb in column_boundaries
+                    ]
 
         # Draw boxes first
         self._draw_boxes(canvas, box_dimensions, box_positions, layout_result)
@@ -738,6 +774,8 @@ class FlowchartGenerator:
                 edges_to.get(target, []),
                 layer_boundaries,
                 src_layer,
+                tgt_layer,
+                layout_result,
             )
 
     def _draw_edge(
@@ -751,6 +789,8 @@ class FlowchartGenerator:
         target_sources: List[str],
         layer_boundaries: List[LayerBoundary],
         src_layer: int,
+        tgt_layer: int,
+        layout_result: LayoutResult,
     ) -> None:
         """Draw a single edge from source to target with layer-aware routing."""
         src_dims = box_dimensions[source]
@@ -768,8 +808,26 @@ class FlowchartGenerator:
         overlap_right = min(src_right, tgt_right)
         has_overlap = overlap_left < overlap_right
 
-        if has_overlap:
-            # Boxes overlap - find which targets from this source also overlap
+        # Check if there are boxes in intermediate layers that would block a direct path
+        boxes_in_path = False
+        if has_overlap and tgt_layer - src_layer > 1:
+            # Check intermediate layers for boxes that would be crossed
+            for layer_idx in range(src_layer + 1, tgt_layer):
+                for node_name in layout_result.layers[layer_idx]:
+                    node_dims = box_dimensions[node_name]
+                    node_x, node_y = box_positions[node_name]
+                    node_left = node_x
+                    node_right = node_x + node_dims.width
+
+                    # Check if this box's x range overlaps with the edge's x range
+                    if node_left < overlap_right and node_right > overlap_left:
+                        boxes_in_path = True
+                        break
+                if boxes_in_path:
+                    break
+
+        if has_overlap and not boxes_in_path:
+            # Boxes overlap and no obstructions - find overlapping targets
             overlapping_targets = []
             for t in source_targets:
                 t_dims = box_dimensions[t]
@@ -805,7 +863,7 @@ class FlowchartGenerator:
             src_port_x = port_x
             tgt_port_x = port_x
         else:
-            # No horizontal overlap - use distributed ports
+            # No horizontal overlap or boxes in path - use distributed ports
             # Source: exit from bottom
             src_port_count = len(source_targets)
             src_port_idx = source_targets.index(target)
@@ -832,7 +890,59 @@ class FlowchartGenerator:
         # End at target top
         end_y = tgt_port_y
 
-        if src_port_x == tgt_port_x:
+        # Check if we need to route around boxes (when there are obstructions)
+        if boxes_in_path:
+            # Route to the right side of all boxes to avoid crossing them
+            max_right_x = src_x + src_dims.width
+            for layer_idx in range(src_layer + 1, tgt_layer):
+                for node_name in layout_result.layers[layer_idx]:
+                    node_dims = box_dimensions[node_name]
+                    node_x, _ = box_positions[node_name]
+                    node_right = node_x + node_dims.width + (2 if self.shadow else 0)
+                    max_right_x = max(max_right_x, node_right)
+
+            # Route: down, right to bypass, down, left to target
+            route_x = max_right_x + 2  # Go 2 chars to the right of all boxes
+
+            # Use the mid_y from source layer for the first horizontal segment
+            mid_y = self._get_safe_horizontal_y(layer_boundaries, src_layer, start_y)
+
+            # Vertical from source to mid
+            self._draw_vertical_line(canvas, src_port_x, start_y, mid_y - 1)
+
+            # Corner turning right
+            canvas.set(src_port_x, mid_y, LINE_CHARS["corner_bottom_left"])
+
+            # Horizontal segment to the route column
+            self._draw_horizontal_line(canvas, src_port_x, route_x, mid_y)
+
+            # Corner turning down
+            canvas.set(route_x, mid_y, LINE_CHARS["corner_top_right"])
+
+            # Find the y position for the horizontal segment above the target
+            tgt_mid_y = self._get_safe_horizontal_y(
+                layer_boundaries, tgt_layer - 1, start_y
+            )
+
+            # Vertical segment down the right side
+            self._draw_vertical_line(canvas, route_x, mid_y + 1, tgt_mid_y - 1)
+
+            # Corner turning left (line comes from above, exits left)
+            canvas.set(route_x, tgt_mid_y, LINE_CHARS["corner_bottom_right"])
+
+            # Horizontal segment back toward target
+            self._draw_horizontal_line(canvas, tgt_port_x, route_x, tgt_mid_y)
+
+            # Corner turning down to target (line comes from right, exits down)
+            canvas.set(tgt_port_x, tgt_mid_y, LINE_CHARS["corner_top_left"])
+
+            # Vertical to target
+            self._draw_vertical_line(canvas, tgt_port_x, tgt_mid_y + 1, end_y - 2)
+
+            # Arrow
+            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
+
+        elif src_port_x == tgt_port_x:
             # Direct vertical line (stop before arrow position)
             self._draw_vertical_line(canvas, src_port_x, start_y, end_y - 2)
             # Draw arrow one row above target box (doesn't overwrite border)
@@ -981,6 +1091,9 @@ class FlowchartGenerator:
         Back edges exit from the bottom-left of the source box, route down
         then left to the margin, up along the margin, then right and up
         to enter the target from the left.
+
+        If there are boxes between the margin and the target, the edge routes
+        below those boxes to avoid crossing through them.
         """
         if not layout_result.back_edges:
             return
@@ -1010,7 +1123,7 @@ class FlowchartGenerator:
 
             # Use offset margin for multiple back edges
             route_x = margin_x + margin_offset
-            margin_offset += 2  # Space out multiple back edges
+            margin_offset += 3  # Space out multiple back edges (increased for clarity)
 
             # Track how many edges already entered this target
             entry_idx = target_entry_count.get(target, 0)
@@ -1031,9 +1144,25 @@ class FlowchartGenerator:
             if entry_y > max_entry_y:
                 entry_y = max_entry_y
 
+            # Check if there are boxes between margin and target that would block
+            # the horizontal path at entry_y
+            boxes_in_path = []
+            for node_name, (node_x, node_y) in box_positions.items():
+                if node_name == target:
+                    continue
+                node_dims = box_dimensions[node_name]
+                node_right = node_x + node_dims.width + (1 if self.shadow else 0)
+                node_bottom = node_y + node_dims.height + (2 if self.shadow else 0)
+
+                # Check if this box is between margin and target horizontally
+                # AND overlaps with entry_y vertically
+                if node_x > route_x and node_right < entry_x:
+                    if node_y <= entry_y < node_bottom:
+                        boxes_in_path.append((node_name, node_x, node_y, node_dims))
+
             # Draw the back edge path:
             # 1. Mark exit on source bottom-left corner area
-            exit_x = src_x + 1 + (margin_offset - 2)  # Offset exit point too
+            exit_x = src_x + 1 + (margin_offset - 3)  # Offset exit point too
             if exit_x >= src_x + src_dims.width - 1:
                 exit_x = src_x + 1
 
@@ -1057,39 +1186,97 @@ class FlowchartGenerator:
             # 5. Corner at margin (turning up)
             canvas.set(route_x, exit_below_y, LINE_CHARS["corner_bottom_left"])
 
-            # 6. Vertical line up the margin
-            for y in range(entry_y + 1, exit_below_y):
-                current = canvas.get(route_x, y)
-                if current == LINE_CHARS["horizontal"]:
-                    canvas.set(route_x, y, LINE_CHARS["cross"])
-                elif current == " " or current == BOX_CHARS["shadow"]:
-                    canvas.set(route_x, y, LINE_CHARS["vertical"])
+            if boxes_in_path:
+                # Need to route around boxes
+                # Strategy: go up to above the target layer (in the gap),
+                # then route horizontally, then down into target from above
+                # This avoids crossing boxes in the same layer as the target
 
-            # 7. Corner at target level (turning right)
-            # Check if there's already something there (from another back edge)
-            # Use corner_top_left (┌) for line going down to vertical below
-            current = canvas.get(route_x, entry_y)
-            if current == LINE_CHARS["vertical"]:
-                canvas.set(route_x, entry_y, LINE_CHARS["tee_right"])
-            elif current == LINE_CHARS["horizontal"]:
-                canvas.set(route_x, entry_y, LINE_CHARS["tee_down"])
-            elif current == " " or current == BOX_CHARS["shadow"]:
-                canvas.set(route_x, entry_y, LINE_CHARS["corner_top_left"])
-            # else leave existing corner/tee
+                # Find the top of the target (where we want to enter from above)
+                safe_y = tgt_y - 2  # Position in gap above target layer
 
-            # 8. Horizontal line from margin to target (stop before arrow position)
-            for x in range(route_x + 1, entry_x - 1):
-                current = canvas.get(x, entry_y)
+                # Find a safe approach x (to the right of blocking boxes)
+                max_blocking_right = max(
+                    node_x + node_dims.width + (2 if self.shadow else 1)
+                    for _, node_x, _, node_dims in boxes_in_path
+                )
+                # Approach from the right of blocking boxes, but left of target
+                approach_x = min(max_blocking_right + 2, entry_x - 4)
+                if approach_x < route_x + 4:
+                    approach_x = route_x + 4
+
+                # 6a. Vertical line up the margin to safe_y
+                for y in range(safe_y + 1, exit_below_y):
+                    current = canvas.get(route_x, y)
+                    if current == LINE_CHARS["horizontal"]:
+                        canvas.set(route_x, y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(route_x, y, LINE_CHARS["vertical"])
+
+                # 7a. Corner at safe_y (turning right)
+                canvas.set(route_x, safe_y, LINE_CHARS["corner_top_left"])
+
+                # 8a. Horizontal line to approach position
+                for x in range(route_x + 1, approach_x):
+                    current = canvas.get(x, safe_y)
+                    if current == LINE_CHARS["vertical"]:
+                        canvas.set(x, safe_y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(x, safe_y, LINE_CHARS["horizontal"])
+
+                # 9a. Corner turning down toward target
+                canvas.set(approach_x, safe_y, LINE_CHARS["corner_top_right"])
+
+                # 10a. Vertical line down to entry level
+                for y in range(safe_y + 1, entry_y):
+                    current = canvas.get(approach_x, y)
+                    if current == LINE_CHARS["horizontal"]:
+                        canvas.set(approach_x, y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(approach_x, y, LINE_CHARS["vertical"])
+
+                # 11a. Corner at entry_y turning right to target
+                canvas.set(approach_x, entry_y, LINE_CHARS["corner_bottom_left"])
+
+                # 12a. Horizontal line to arrow position
+                for x in range(approach_x + 1, entry_x - 1):
+                    current = canvas.get(x, entry_y)
+                    if current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(x, entry_y, LINE_CHARS["horizontal"])
+
+                # 13a. Arrow
+                canvas.set(entry_x - 1, entry_y, ARROW_CHARS["right"])
+            else:
+                # No boxes in path - draw directly
+                # 6. Vertical line up the margin
+                for y in range(entry_y + 1, exit_below_y):
+                    current = canvas.get(route_x, y)
+                    if current == LINE_CHARS["horizontal"]:
+                        canvas.set(route_x, y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(route_x, y, LINE_CHARS["vertical"])
+
+                # 7. Corner at target level (turning right)
+                current = canvas.get(route_x, entry_y)
                 if current == LINE_CHARS["vertical"]:
-                    canvas.set(x, entry_y, LINE_CHARS["cross"])
-                elif current == LINE_CHARS["corner_top_left"]:
-                    canvas.set(x, entry_y, LINE_CHARS["tee_down"])
+                    canvas.set(route_x, entry_y, LINE_CHARS["tee_right"])
+                elif current == LINE_CHARS["horizontal"]:
+                    canvas.set(route_x, entry_y, LINE_CHARS["tee_down"])
                 elif current == " " or current == BOX_CHARS["shadow"]:
-                    canvas.set(x, entry_y, LINE_CHARS["horizontal"])
-                # else leave horizontal lines alone
+                    canvas.set(route_x, entry_y, LINE_CHARS["corner_top_left"])
 
-            # 9. Arrow one column before target box (doesn't overwrite border)
-            canvas.set(entry_x - 1, entry_y, ARROW_CHARS["right"])
+                # 8. Horizontal line from margin to target
+                for x in range(route_x + 1, entry_x - 1):
+                    current = canvas.get(x, entry_y)
+                    if current == LINE_CHARS["vertical"]:
+                        canvas.set(x, entry_y, LINE_CHARS["cross"])
+                    elif current == LINE_CHARS["corner_top_left"]:
+                        canvas.set(x, entry_y, LINE_CHARS["tee_down"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(x, entry_y, LINE_CHARS["horizontal"])
+
+                # 9. Arrow one column before target box
+                canvas.set(entry_x - 1, entry_y, ARROW_CHARS["right"])
 
     def _draw_edges_horizontal(
         self,
@@ -1156,6 +1343,8 @@ class FlowchartGenerator:
                 edges_to.get(target, []),
                 column_boundaries,
                 src_layer,
+                tgt_layer,
+                layout_result,
             )
 
     def _draw_edge_horizontal(
@@ -1169,6 +1358,8 @@ class FlowchartGenerator:
         target_sources: List[str],
         column_boundaries: List[ColumnBoundary],
         src_layer: int,
+        tgt_layer: int,
+        layout_result: LayoutResult,
     ) -> None:
         """Draw a single edge from source to target in horizontal (LR) mode."""
         src_dims = box_dimensions[source]
@@ -1186,8 +1377,25 @@ class FlowchartGenerator:
         overlap_bottom = min(src_bottom, tgt_bottom)
         has_overlap = overlap_top < overlap_bottom
 
-        if has_overlap:
-            # Boxes overlap vertically - find overlapping targets from source
+        # Check if there are boxes in intermediate columns that would block the path
+        boxes_in_path = False
+        if has_overlap and tgt_layer - src_layer > 1:
+            for layer_idx in range(src_layer + 1, tgt_layer):
+                for node_name in layout_result.layers[layer_idx]:
+                    node_dims = box_dimensions[node_name]
+                    node_x, node_y = box_positions[node_name]
+                    node_top = node_y
+                    node_bottom = node_y + node_dims.height
+
+                    # Check if this box's y range overlaps with the edge's y range
+                    if node_top < overlap_bottom and node_bottom > overlap_top:
+                        boxes_in_path = True
+                        break
+                if boxes_in_path:
+                    break
+
+        if has_overlap and not boxes_in_path:
+            # Boxes overlap vertically and no obstructions
             overlapping_targets = []
             for t in source_targets:
                 t_dims = box_dimensions[t]
@@ -1218,7 +1426,7 @@ class FlowchartGenerator:
             src_port_y = port_y
             tgt_port_y = port_y
         else:
-            # No vertical overlap - use distributed ports
+            # No vertical overlap or boxes in path - use distributed ports
             src_port_count = len(source_targets)
             src_port_idx = source_targets.index(target)
             src_port_y = self._calculate_port_y(
@@ -1243,7 +1451,59 @@ class FlowchartGenerator:
         start_x = src_port_x + 1  # After source (through shadow)
         end_x = tgt_port_x
 
-        if src_port_y == tgt_port_y:
+        # Check if we need to route around boxes
+        if boxes_in_path:
+            # Route below all boxes to avoid crossing them
+            max_bottom_y = src_y + src_dims.height
+            for layer_idx in range(src_layer + 1, tgt_layer):
+                for node_name in layout_result.layers[layer_idx]:
+                    node_dims = box_dimensions[node_name]
+                    node_x, node_y = box_positions[node_name]
+                    node_bottom = node_y + node_dims.height + (2 if self.shadow else 0)
+                    max_bottom_y = max(max_bottom_y, node_bottom)
+
+            # Route: right, down to bypass, right, up to target
+            route_y = max_bottom_y + 2  # Go 2 rows below all boxes
+
+            # Use the mid_x from source layer for the first vertical segment
+            mid_x = self._get_safe_vertical_x(column_boundaries, src_layer, start_x)
+
+            # Horizontal from source to mid
+            self._draw_horizontal_line(canvas, start_x - 1, mid_x, src_port_y)
+
+            # Corner turning down
+            canvas.set(mid_x, src_port_y, LINE_CHARS["corner_top_right"])
+
+            # Vertical segment down to route_y
+            self._draw_vertical_line(canvas, mid_x, src_port_y + 1, route_y - 1)
+
+            # Corner turning right
+            canvas.set(mid_x, route_y, LINE_CHARS["corner_bottom_left"])
+
+            # Find the x position for the vertical segment before the target
+            tgt_mid_x = self._get_safe_vertical_x(
+                column_boundaries, tgt_layer - 1, start_x
+            )
+
+            # Horizontal segment below boxes
+            self._draw_horizontal_line(canvas, mid_x, tgt_mid_x, route_y)
+
+            # Corner turning up
+            canvas.set(tgt_mid_x, route_y, LINE_CHARS["corner_bottom_right"])
+
+            # Vertical segment up toward target
+            self._draw_vertical_line(canvas, tgt_mid_x, tgt_port_y + 1, route_y - 1)
+
+            # Corner turning right to target
+            canvas.set(tgt_mid_x, tgt_port_y, LINE_CHARS["corner_top_left"])
+
+            # Horizontal to target
+            self._draw_horizontal_line(canvas, tgt_mid_x, end_x - 1, tgt_port_y)
+
+            # Arrow
+            canvas.set(tgt_port_x - 1, tgt_port_y, ARROW_CHARS["right"])
+
+        elif src_port_y == tgt_port_y:
             # Direct horizontal line
             # Note: _draw_horizontal_line is exclusive of endpoints, so we adjust
             # start_x - 1 so the line begins at start_x, and end_x - 1 so it ends
@@ -1309,6 +1569,9 @@ class FlowchartGenerator:
         Back edges exit from the top-right of the source box, route up
         to the margin, left along the margin, then down to enter the
         target from the top.
+
+        If there are boxes between the margin and the target, the edge routes
+        to the right of those boxes to avoid crossing through them.
         """
         if not layout_result.back_edges:
             return
@@ -1338,7 +1601,7 @@ class FlowchartGenerator:
 
             # Use offset margin for multiple back edges
             route_y = margin_y + margin_offset
-            margin_offset += 2
+            margin_offset += 3  # Space out multiple back edges (increased for clarity)
 
             # Track how many edges already entered this target
             entry_idx = target_entry_count.get(target, 0)
@@ -1358,9 +1621,25 @@ class FlowchartGenerator:
             if entry_x > max_entry_x:
                 entry_x = max_entry_x
 
+            # Check if there are boxes between margin and target that would block
+            # the vertical path at entry_x
+            boxes_in_path = []
+            for node_name, (node_x, node_y) in box_positions.items():
+                if node_name == target:
+                    continue
+                node_dims = box_dimensions[node_name]
+                node_right = node_x + node_dims.width + (1 if self.shadow else 0)
+                node_bottom = node_y + node_dims.height + (2 if self.shadow else 0)
+
+                # Check if this box is between margin and target vertically
+                # AND overlaps with entry_x horizontally
+                if node_y > route_y and node_bottom < entry_y:
+                    if node_x <= entry_x < node_right:
+                        boxes_in_path.append((node_name, node_x, node_y, node_dims))
+
             # Draw the back edge path:
             # 1. Mark exit on source right side near top
-            exit_y = src_y + 1 + (margin_offset - 2)
+            exit_y = src_y + 1 + (margin_offset - 3)
             if exit_y >= src_y + src_dims.height - 1:
                 exit_y = src_y + 1
 
@@ -1370,8 +1649,8 @@ class FlowchartGenerator:
             for x in range(exit_border_x + 1, exit_right_x + 1):
                 canvas.set(x, exit_y, LINE_CHARS["horizontal"])
 
-            # 3. Corner turning up
-            canvas.set(exit_right_x, exit_y, LINE_CHARS["corner_top_right"])
+            # 3. Corner turning up (line enters from left, exits upward)
+            canvas.set(exit_right_x, exit_y, LINE_CHARS["corner_bottom_right"])
 
             # 4. Vertical line up to margin
             for y in range(route_y + 1, exit_y):
@@ -1392,22 +1671,87 @@ class FlowchartGenerator:
                 elif current == " " or current == BOX_CHARS["shadow"]:
                     canvas.set(x, route_y, LINE_CHARS["horizontal"])
 
-            # 7. Corner at target column (turning down)
-            current = canvas.get(entry_x, route_y)
-            if current == LINE_CHARS["horizontal"]:
-                canvas.set(entry_x, route_y, LINE_CHARS["tee_down"])
-            elif current == LINE_CHARS["vertical"]:
-                canvas.set(entry_x, route_y, LINE_CHARS["tee_down"])
-            elif current == " " or current == BOX_CHARS["shadow"]:
+            if boxes_in_path:
+                # Need to route around boxes
+                # Strategy: go right to the left of target column (in the gap),
+                # then route vertically, then into target from the left side
+                # This avoids crossing boxes in the same column as the target
+
+                # Find a safe x position (to the left of target, in the gap)
+                safe_x = tgt_x - 2  # Position in gap to left of target column
+
+                # Find a safe approach y (below the blocking boxes)
+                max_blocking_bottom = max(
+                    node_y + node_dims.height + (2 if self.shadow else 0)
+                    for _, _, node_y, node_dims in boxes_in_path
+                )
+                # Approach from below blocking boxes, but above target
+                approach_y = min(max_blocking_bottom + 2, entry_y - 4)
+                if approach_y < route_y + 4:
+                    approach_y = route_y + 4
+
+                # 7a. Corner at entry_x, route_y (turning down)
                 canvas.set(entry_x, route_y, LINE_CHARS["corner_top_left"])
 
-            # 8. Vertical line from margin to target (stop before arrow)
-            for y in range(route_y + 1, entry_y - 1):
-                current = canvas.get(entry_x, y)
-                if current == LINE_CHARS["horizontal"]:
-                    canvas.set(entry_x, y, LINE_CHARS["cross"])
-                elif current == " " or current == BOX_CHARS["shadow"]:
-                    canvas.set(entry_x, y, LINE_CHARS["vertical"])
+                # 8a. Vertical line down to approach_y
+                for y in range(route_y + 1, approach_y):
+                    current = canvas.get(entry_x, y)
+                    if current == LINE_CHARS["horizontal"]:
+                        canvas.set(entry_x, y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(entry_x, y, LINE_CHARS["vertical"])
 
-            # 9. Arrow one row above target box
-            canvas.set(entry_x, entry_y - 1, ARROW_CHARS["down"])
+                # 9a. Corner turning right at approach_y
+                canvas.set(entry_x, approach_y, LINE_CHARS["corner_bottom_left"])
+
+                # 10a. Horizontal to safe_x
+                for x in range(entry_x + 1, safe_x):
+                    current = canvas.get(x, approach_y)
+                    if current == LINE_CHARS["vertical"]:
+                        canvas.set(x, approach_y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(x, approach_y, LINE_CHARS["horizontal"])
+
+                # 11a. Corner turning up
+                canvas.set(safe_x, approach_y, LINE_CHARS["corner_bottom_right"])
+
+                # 12a. Vertical up to entry_y
+                for y in range(entry_y + 1, approach_y):
+                    current = canvas.get(safe_x, y)
+                    if current == LINE_CHARS["horizontal"]:
+                        canvas.set(safe_x, y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(safe_x, y, LINE_CHARS["vertical"])
+
+                # 13a. Corner turning right to entry
+                canvas.set(safe_x, entry_y, LINE_CHARS["corner_top_left"])
+
+                # 14a. Horizontal to arrow position
+                for x in range(safe_x + 1, tgt_x - 1):
+                    current = canvas.get(x, entry_y)
+                    if current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(x, entry_y, LINE_CHARS["horizontal"])
+
+                # 15a. Arrow
+                canvas.set(tgt_x - 1, entry_y, ARROW_CHARS["right"])
+            else:
+                # No boxes in path - draw directly
+                # 7. Corner at target column (turning down)
+                current = canvas.get(entry_x, route_y)
+                if current == LINE_CHARS["horizontal"]:
+                    canvas.set(entry_x, route_y, LINE_CHARS["tee_down"])
+                elif current == LINE_CHARS["vertical"]:
+                    canvas.set(entry_x, route_y, LINE_CHARS["tee_down"])
+                elif current == " " or current == BOX_CHARS["shadow"]:
+                    canvas.set(entry_x, route_y, LINE_CHARS["corner_top_left"])
+
+                # 8. Vertical line from margin to target (stop before arrow)
+                for y in range(route_y + 1, entry_y - 1):
+                    current = canvas.get(entry_x, y)
+                    if current == LINE_CHARS["horizontal"]:
+                        canvas.set(entry_x, y, LINE_CHARS["cross"])
+                    elif current == " " or current == BOX_CHARS["shadow"]:
+                        canvas.set(entry_x, y, LINE_CHARS["vertical"])
+
+                # 9. Arrow one row above target box
+                canvas.set(entry_x, entry_y - 1, ARROW_CHARS["down"])

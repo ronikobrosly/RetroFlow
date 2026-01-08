@@ -349,67 +349,138 @@ class TitleRenderer:
     Renders title banners with double-line borders.
     """
 
-    def __init__(self, padding: int = 2):
+    def __init__(self, padding: int = 2, max_line_width: int = 15):
         """
         Initialize the title renderer.
 
         Args:
             padding: Horizontal padding inside the title box
+            max_line_width: Maximum width for text before wrapping (default 15)
         """
         self.padding = padding
+        self.max_line_width = max_line_width
         self.box_chars = BOX_CHARS_DOUBLE
+
+    def _wrap_title_text(self, title: str) -> List[str]:
+        """
+        Wrap title text at word boundaries, respecting max_line_width.
+
+        Words are wrapped so that each line doesn't exceed max_line_width
+        characters (wrapping at the word boundary after reaching the limit).
+
+        Args:
+            title: The title text to wrap
+
+        Returns:
+            List of wrapped lines
+        """
+        words = title.split()
+        if not words:
+            return [""]
+
+        lines: List[str] = []
+        current_line: List[str] = []
+        current_length = 0
+
+        for word in words:
+            word_len = len(word)
+            space_needed = 1 if current_line else 0
+
+            # Check if adding this word exceeds the limit
+            if current_length + space_needed + word_len > self.max_line_width:
+                # If we have content on the current line, save it and start new line
+                if current_line:
+                    lines.append(" ".join(current_line))
+                    current_line = [word]
+                    current_length = word_len
+                else:
+                    # Single word exceeds limit - just add it anyway
+                    lines.append(word)
+                    current_line = []
+                    current_length = 0
+            else:
+                current_line.append(word)
+                current_length += space_needed + word_len
+
+        # Add remaining content
+        if current_line:
+            lines.append(" ".join(current_line))
+
+        return lines if lines else [""]
 
     def calculate_title_dimensions(self, title: str, min_width: int = 0) -> tuple:
         """
         Calculate the dimensions needed for a title banner.
 
+        The title is wrapped at word boundaries respecting max_line_width,
+        and the box is sized to fit the wrapped text (not the diagram width).
+
         Args:
             title: The title text
-            min_width: Minimum width for the title box
+            min_width: Minimum width for the title box (ignored for sizing,
+                       but returned for compatibility)
 
         Returns:
             Tuple of (width, height) for the title box
         """
+        # Wrap the title text
+        lines = self._wrap_title_text(title)
+
+        # Calculate width based on longest wrapped line
+        max_line_len = max(len(line) for line in lines)
+
         # Title box: border + padding + text + padding + border
-        text_width = len(title)
-        box_width = max(text_width + 2 * self.padding + 2, min_width)
-        box_height = 3  # Top border, title text, bottom border
+        box_width = max_line_len + 2 * self.padding + 2
+        # Height: top border + text lines + bottom border
+        box_height = len(lines) + 2
+
         return box_width, box_height
 
     def draw_title(self, canvas: Canvas, x: int, y: int, title: str, width: int) -> int:
         """
         Draw a title banner with double-line border.
 
+        The title is wrapped at word boundaries and centered within the box.
+
         Args:
             canvas: The canvas to draw on
             x: X position (left edge)
             y: Y position (top edge)
             title: The title text
-            width: Total width of the title box
+            width: Total width of the title box (used for centering text)
 
         Returns:
             The height of the title box (for positioning content below)
         """
         chars = self.box_chars
+        lines = self._wrap_title_text(title)
+
+        # Recalculate actual width based on content
+        max_line_len = max(len(line) for line in lines)
+        actual_width = max_line_len + 2 * self.padding + 2
+        height = len(lines) + 2
 
         # Draw top border
         canvas.set(x, y, chars["top_left"])
-        for i in range(1, width - 1):
+        for i in range(1, actual_width - 1):
             canvas.set(x + i, y, chars["horizontal"])
-        canvas.set(x + width - 1, y, chars["top_right"])
+        canvas.set(x + actual_width - 1, y, chars["top_right"])
 
-        # Draw middle row with title (centered)
-        canvas.set(x, y + 1, chars["vertical"])
-        canvas.set(x + width - 1, y + 1, chars["vertical"])
+        # Draw middle rows with title text (centered)
+        for line_idx, line in enumerate(lines):
+            row_y = y + 1 + line_idx
+            canvas.set(x, row_y, chars["vertical"])
+            canvas.set(x + actual_width - 1, row_y, chars["vertical"])
 
-        # Center the title text
-        text_start = x + (width - len(title)) // 2
-        canvas.draw_text(text_start, y + 1, title)
+            # Center the text line within the box
+            available_width = actual_width - 2  # Minus borders
+            text_start = x + 1 + (available_width - len(line)) // 2
+            canvas.draw_text(text_start, row_y, line)
 
         # Draw bottom border
-        canvas.set(x, y + 2, chars["bottom_left"])
-        for i in range(1, width - 1):
-            canvas.set(x + i, y + 2, chars["horizontal"])
-        canvas.set(x + width - 1, y + 2, chars["bottom_right"])
+        canvas.set(x, y + height - 1, chars["bottom_left"])
+        for i in range(1, actual_width - 1):
+            canvas.set(x + i, y + height - 1, chars["horizontal"])
+        canvas.set(x + actual_width - 1, y + height - 1, chars["bottom_right"])
 
-        return 3  # Height of the title box
+        return height  # Height of the title box
