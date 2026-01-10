@@ -29,6 +29,8 @@ good_ascii_diagram_2
 
 extensive_retroflow_testing.py
 
+test_*.png
+
 test_*.txt
 # C extensions
 *.so
