@@ -15,12 +15,13 @@ Example:
 
 from .generator import FlowchartGenerator
 from .layout import LayoutResult, NodeLayout, SugiyamaLayout
-from .parser import ParseError, Parser, parse_flowchart
+from .parser import Group, ParseError, Parser, parse_flowchart
 from .renderer import (
     BOX_CHARS_DOUBLE,
     BOX_CHARS_ROUNDED,
     BoxRenderer,
     Canvas,
+    GroupBoxRenderer,
     LineRenderer,
     TitleRenderer,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "FlowchartGenerator",
     "Parser",
     "ParseError",
+    "Group",
     "parse_flowchart",
     "SugiyamaLayout",
     "LayoutResult",
@@ -40,6 +42,7 @@ __all__ = [
     "BoxRenderer",
     "BOX_CHARS_DOUBLE",
     "BOX_CHARS_ROUNDED",
+    "GroupBoxRenderer",
     "LineRenderer",
     "TitleRenderer",
     "EdgeRouter",

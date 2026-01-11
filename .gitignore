@@ -32,6 +32,9 @@ extensive_retroflow_testing.py
 test_*.png
 
 test_*.txt
+
+grouped_boxes.png
+
 # C extensions
 *.so
 

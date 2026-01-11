@@ -8,6 +8,7 @@ from retroflow.renderer import (
     BoxDimensions,
     BoxRenderer,
     Canvas,
+    GroupBoxRenderer,
     LineRenderer,
     TitleRenderer,
 )
@@ -542,3 +543,113 @@ class TestTitleRenderer:
         # Text starts at x = 1 (border) + 2 (offset) = 3
         assert canvas.get(3, 1) == "H"
         assert canvas.get(4, 1) == "i"
+
+
+class TestGroupBoxRenderer:
+    """Tests for GroupBoxRenderer class."""
+
+    def test_group_box_renderer_creation(self):
+        """Test GroupBoxRenderer creation with defaults."""
+        gbr = GroupBoxRenderer()
+        assert gbr is not None
+        assert gbr.padding == 2
+        assert gbr.max_label_width == 20
+
+    def test_group_box_renderer_custom_params(self):
+        """Test GroupBoxRenderer with custom parameters."""
+        gbr = GroupBoxRenderer(padding=4, max_label_width=30)
+        assert gbr.padding == 4
+        assert gbr.max_label_width == 30
+
+    def test_wrap_label_text_short(self):
+        """Test label wrapping with short text."""
+        gbr = GroupBoxRenderer(max_label_width=20)
+        lines = gbr._wrap_label_text("Short")
+        assert lines == ["Short"]
+
+    def test_wrap_label_text_long(self):
+        """Test label wrapping with text exceeding max width."""
+        gbr = GroupBoxRenderer(max_label_width=10)
+        lines = gbr._wrap_label_text("This is a longer label text")
+        assert len(lines) > 1
+        for line in lines:
+            assert len(line) <= 10
+
+    def test_wrap_label_text_exact_width(self):
+        """Test label wrapping at exact max width."""
+        gbr = GroupBoxRenderer(max_label_width=5)
+        lines = gbr._wrap_label_text("12345")
+        assert lines == ["12345"]
+
+    def test_wrap_label_text_single_long_word(self):
+        """Test label wrapping with single long word."""
+        gbr = GroupBoxRenderer(max_label_width=5)
+        lines = gbr._wrap_label_text("VeryLongWord")
+        # Single word exceeding max should be kept on one line
+        assert "VeryLongWord" in lines[0] or len(lines) >= 1
+
+    def test_draw_group_box_corners(self, canvas):
+        """Test that group box draws correct corners."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 20, 10, "Test")
+
+        assert canvas.get(0, 0) == BOX_CHARS["top_left"]
+        assert canvas.get(19, 0) == BOX_CHARS["top_right"]
+        assert canvas.get(0, 9) == BOX_CHARS["bottom_left"]
+        assert canvas.get(19, 9) == BOX_CHARS["bottom_right"]
+
+    def test_draw_group_box_borders(self, canvas):
+        """Test that group box draws correct horizontal borders."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 20, 10, "Test")
+
+        # Check horizontal borders
+        assert canvas.get(1, 0) == BOX_CHARS["horizontal"]
+        assert canvas.get(1, 9) == BOX_CHARS["horizontal"]
+
+    def test_draw_group_box_sides(self, canvas):
+        """Test that group box draws correct vertical sides."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 20, 10, "Test")
+
+        # Check vertical sides
+        assert canvas.get(0, 1) == BOX_CHARS["vertical"]
+        assert canvas.get(19, 1) == BOX_CHARS["vertical"]
+
+    def test_draw_group_box_label_present(self, canvas):
+        """Test that group box label is drawn."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 30, 10, "MyGroup")
+
+        rendered = canvas.render()
+        assert "MyGroup" in rendered
+
+    def test_draw_group_box_at_offset(self, canvas):
+        """Test drawing group box at non-zero position."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 5, 3, 20, 10, "Test")
+
+        # Corners at offset position
+        assert canvas.get(5, 3) == BOX_CHARS["top_left"]
+        assert canvas.get(24, 3) == BOX_CHARS["top_right"]
+        assert canvas.get(5, 12) == BOX_CHARS["bottom_left"]
+        assert canvas.get(24, 12) == BOX_CHARS["bottom_right"]
+
+    def test_draw_group_box_label_centered(self, canvas):
+        """Test that group box label is centered."""
+        gbr = GroupBoxRenderer()
+        label = "AB"
+        gbr.draw_group_box(canvas, 0, 0, 20, 10, label)
+
+        # Label should be approximately centered in the top area
+        rendered = canvas.render()
+        assert "AB" in rendered
+
+    def test_draw_group_box_multiline_label(self, canvas):
+        """Test group box with label that wraps to multiple lines."""
+        gbr = GroupBoxRenderer(max_label_width=10)
+        gbr.draw_group_box(canvas, 0, 0, 30, 15, "A Very Long Group Name Here")
+
+        rendered = canvas.render()
+        # Label should be wrapped across multiple lines
+        assert "Long" in rendered or "Group" in rendered

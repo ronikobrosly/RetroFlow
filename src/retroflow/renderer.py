@@ -124,10 +124,10 @@ class BoxRenderer:
     def __init__(
         self,
         max_text_width: int = 20,
-        padding: int = 2,
+        padding: int = 1,
         shadow: bool = True,
         rounded: bool = False,
-        compact: bool = False,
+        compact: bool = True,
     ):
         self.max_text_width = max_text_width
         self.padding = padding
@@ -342,6 +342,119 @@ class LineRenderer:
                 canvas.set(x, y, LINE_CHARS["tee_left"])
         elif current.startswith("corner_") or current in LINE_CHARS.values():
             canvas.set(x, y, LINE_CHARS["cross"])
+
+
+class GroupBoxRenderer:
+    """
+    Renders group boxes with labels centered on top.
+
+    Group boxes are drawn with single-line borders (like regular boxes)
+    and contain a label centered at the top.
+    """
+
+    def __init__(self, padding: int = 2, max_label_width: int = 20):
+        """
+        Initialize the group box renderer.
+
+        Args:
+            padding: Padding between group border and inner content
+            max_label_width: Maximum width for label before wrapping
+        """
+        self.padding = padding
+        self.max_label_width = max_label_width
+        self.box_chars = BOX_CHARS
+
+    def _wrap_label_text(self, label: str) -> List[str]:
+        """
+        Wrap label text at word boundaries.
+
+        Args:
+            label: The label text to wrap
+
+        Returns:
+            List of wrapped lines
+        """
+        words = label.split()
+        if not words:
+            return [""]
+
+        lines: List[str] = []
+        current_line: List[str] = []
+        current_length = 0
+
+        for word in words:
+            word_len = len(word)
+            space_needed = 1 if current_line else 0
+
+            if current_length + space_needed + word_len > self.max_label_width:
+                if current_line:
+                    lines.append(" ".join(current_line))
+                    current_line = [word]
+                    current_length = word_len
+                else:
+                    lines.append(word)
+                    current_line = []
+                    current_length = 0
+            else:
+                current_line.append(word)
+                current_length += space_needed + word_len
+
+        if current_line:
+            lines.append(" ".join(current_line))
+
+        return lines if lines else [""]
+
+    def draw_group_box(
+        self,
+        canvas: Canvas,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        label: str,
+    ) -> None:
+        """
+        Draw a group box with a centered label on top.
+
+        Group boxes use dotted lines for the sides (top, bottom, left, right)
+        while keeping solid corners for a clean look.
+
+        Args:
+            canvas: The canvas to draw on
+            x: X position (left edge)
+            y: Y position (top edge)
+            width: Total width of the group box
+            height: Total height of the group box
+            label: The label text to display centered on top
+        """
+        chars = self.box_chars
+
+        # Wrap the label text
+        label_lines = self._wrap_label_text(label)
+
+        # Draw top border with dotted line (corners are solid)
+        canvas.set(x, y, chars["top_left"])
+        for i in range(1, width - 1):
+            canvas.set(x + i, y, ".")
+        canvas.set(x + width - 1, y, chars["top_right"])
+
+        # Draw label lines centered just below the top border
+        for line_idx, line in enumerate(label_lines):
+            label_y = y + 1 + line_idx
+            # Center the label within the box
+            text_start = x + 1 + (width - 2 - len(line)) // 2
+            canvas.draw_text(text_start, label_y, line)
+
+        # Draw sides with dotted lines (from below label to bottom)
+        for row in range(1, height - 1):
+            canvas.set(x, y + row, ".")
+            canvas.set(x + width - 1, y + row, ".")
+
+        # Draw bottom border with dotted line (corners are solid)
+        canvas.set(x, y + height - 1, chars["bottom_left"])
+        for i in range(1, width - 1):
+            canvas.set(x + i, y + height - 1, ".")
+        canvas.set(x + width - 1, y + height - 1, chars["bottom_right"])
 
 
 class TitleRenderer:

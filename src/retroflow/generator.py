@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 from .layout import LayoutResult, NetworkXLayout
-from .parser import Parser
+from .parser import Group, Parser
 from .renderer import (
     ARROW_CHARS,
     BOX_CHARS,
@@ -20,6 +20,7 @@ from .renderer import (
     BoxDimensions,
     BoxRenderer,
     Canvas,
+    GroupBoxRenderer,
     TitleRenderer,
 )
 
@@ -46,6 +47,18 @@ class ColumnBoundary:
     gap_end_x: int  # End of gap (start of next column)
 
 
+@dataclass
+class GroupBoundingBox:
+    """Bounding box for a group of nodes."""
+
+    group: Group
+    x: int  # Left edge of group box
+    y: int  # Top edge of group box
+    width: int  # Total width including border
+    height: int  # Total height including border
+    label_height: int  # Height of the label area
+
+
 class FlowchartGenerator:
     """
     Generate ASCII flowcharts from simple text descriptions.
@@ -67,7 +80,7 @@ class FlowchartGenerator:
         vertical_spacing: int = 3,
         shadow: bool = True,
         rounded: bool = False,
-        compact: bool = False,
+        compact: bool = True,
         font: Optional[str] = None,
         title: Optional[str] = None,
         direction: str = "TB",
@@ -112,6 +125,11 @@ class FlowchartGenerator:
             compact=compact,
         )
         self.title_renderer = TitleRenderer()
+        self.group_box_renderer = GroupBoxRenderer(padding=2)
+        # Padding around grouped nodes inside group box
+        self.group_padding = 2
+        # Minimum spacing between group boxes (to prevent touching/overlapping)
+        self.group_box_spacing = 2
 
     def generate(self, input_text: str, title: Optional[str] = None) -> str:
         """
@@ -127,11 +145,12 @@ class FlowchartGenerator:
         # Use provided title or fall back to instance title
         effective_title = title if title is not None else self.title
 
-        # Parse input
+        # Parse input (also parses groups and stores them in self.parser.groups)
         connections = self.parser.parse(input_text)
+        groups = self.parser.groups
 
         # Run layout
-        layout_result = self.layout_engine.layout(connections)
+        layout_result = self.layout_engine.layout(connections, groups)
 
         # Calculate box dimensions for each node
         box_dimensions = self._calculate_all_box_dimensions(layout_result)
@@ -162,10 +181,71 @@ class FlowchartGenerator:
                 layout_result, box_dimensions
             )
 
-        # Calculate canvas size
+        # Calculate group bounding boxes (may have negative y values due to labels)
+        group_boxes = self._calculate_group_bounding_boxes(
+            layout_result, box_dimensions, box_positions
+        )
+
+        # Calculate extra margin needed for group labels
+        group_top_margin = 0
+        group_left_margin = 0
+        if group_boxes:
+            # Find how much extra space we need at top/left for group boxes
+            for gb in group_boxes:
+                if gb.y < 0:
+                    group_top_margin = max(group_top_margin, -gb.y)
+                if gb.x < 0:
+                    group_left_margin = max(group_left_margin, -gb.x)
+
+            # Offset all box positions to accommodate group margins
+            if group_top_margin > 0 or group_left_margin > 0:
+                box_positions = {
+                    name: (x + group_left_margin, y + group_top_margin)
+                    for name, (x, y) in box_positions.items()
+                }
+                # Recalculate group boxes with new positions
+                group_boxes = self._calculate_group_bounding_boxes(
+                    layout_result, box_dimensions, box_positions
+                )
+                # Also offset layer boundaries
+                if group_top_margin > 0:
+                    layer_boundaries = [
+                        LayerBoundary(
+                            layer_idx=lb.layer_idx,
+                            top_y=lb.top_y + group_top_margin,
+                            bottom_y=lb.bottom_y + group_top_margin,
+                            gap_start_y=lb.gap_start_y + group_top_margin,
+                            gap_end_y=lb.gap_end_y + group_top_margin,
+                        )
+                        for lb in layer_boundaries
+                    ]
+                # Also offset column boundaries for LR mode
+                if group_left_margin > 0 and self.direction == "LR":
+                    column_boundaries = [
+                        ColumnBoundary(
+                            layer_idx=cb.layer_idx,
+                            left_x=cb.left_x + group_left_margin,
+                            right_x=cb.right_x + group_left_margin,
+                            gap_start_x=cb.gap_start_x + group_left_margin,
+                            gap_end_x=cb.gap_end_x + group_left_margin,
+                        )
+                        for cb in column_boundaries
+                    ]
+
+        # Separate group boxes to ensure they don't touch or overlap
+        if group_boxes:
+            group_boxes = self._separate_group_boxes(group_boxes)
+
+        # Calculate canvas size (including group boxes)
         canvas_width, canvas_height = self._calculate_canvas_size(
             box_dimensions, box_positions
         )
+
+        # Expand canvas to fit group boxes
+        if group_boxes:
+            for gb in group_boxes:
+                canvas_width = max(canvas_width, gb.x + gb.width + 2)
+                canvas_height = max(canvas_height, gb.y + gb.height + 2)
 
         # Calculate title dimensions and offset
         title_height = 0
@@ -227,8 +307,25 @@ class FlowchartGenerator:
                         )
                         for cb in column_boundaries
                     ]
+            # Also offset group boxes
+            if group_boxes:
+                group_boxes = [
+                    GroupBoundingBox(
+                        group=gb.group,
+                        x=gb.x + diagram_x_offset,
+                        y=gb.y + title_height,
+                        width=gb.width,
+                        height=gb.height,
+                        label_height=gb.label_height,
+                    )
+                    for gb in group_boxes
+                ]
 
-        # Draw boxes first
+        # Draw group boxes first (before node boxes so nodes appear on top)
+        if group_boxes:
+            self._draw_group_boxes(canvas, group_boxes)
+
+        # Draw node boxes
         self._draw_boxes(canvas, box_dimensions, box_positions, layout_result)
 
         # Draw forward edges with layer-aware routing
@@ -697,6 +794,231 @@ class FlowchartGenerator:
 
         return max_x, max_y
 
+    def _calculate_group_bounding_boxes(
+        self,
+        layout_result: LayoutResult,
+        box_dimensions: Dict[str, BoxDimensions],
+        box_positions: Dict[str, Tuple[int, int]],
+    ) -> List[GroupBoundingBox]:
+        """
+        Calculate bounding boxes for all groups.
+
+        For each group, finds the minimum bounding box that contains all
+        member nodes with padding for the group border and label.
+
+        Args:
+            layout_result: The layout result containing groups
+            box_dimensions: Dictionary of box dimensions
+            box_positions: Dictionary of box positions
+
+        Returns:
+            List of GroupBoundingBox objects
+        """
+        group_boxes: List[GroupBoundingBox] = []
+
+        for group in layout_result.groups:
+            # Find bounds of all nodes in this group
+            min_x = float("inf")
+            min_y = float("inf")
+            max_x = float("-inf")
+            max_y = float("-inf")
+
+            valid_nodes = []
+            for node_name in group.nodes:
+                if node_name in box_positions and node_name in box_dimensions:
+                    valid_nodes.append(node_name)
+                    x, y = box_positions[node_name]
+                    dims = box_dimensions[node_name]
+
+                    # Include shadow in calculations
+                    node_right = x + dims.width + (1 if self.shadow else 0)
+                    node_bottom = y + dims.height + (2 if self.shadow else 0)
+
+                    min_x = min(min_x, x)
+                    min_y = min(min_y, y)
+                    max_x = max(max_x, node_right)
+                    max_y = max(max_y, node_bottom)
+
+            if not valid_nodes:
+                continue
+
+            # Calculate label height (wrapped text)
+            label_lines = self.group_box_renderer._wrap_label_text(group.name)
+            label_height = len(label_lines) + 1  # +1 for spacing below label
+
+            # Add padding around the group
+            group_x = int(min_x) - self.group_padding
+            group_y = int(min_y) - self.group_padding - label_height
+            group_width = int(max_x - min_x) + 2 * self.group_padding + 1
+            group_height = (
+                int(max_y - min_y) + 2 * self.group_padding + label_height + 1
+            )
+
+            group_boxes.append(
+                GroupBoundingBox(
+                    group=group,
+                    x=group_x,
+                    y=group_y,
+                    width=group_width,
+                    height=group_height,
+                    label_height=label_height,
+                )
+            )
+
+        return group_boxes
+
+    def _separate_group_boxes(
+        self,
+        group_boxes: List[GroupBoundingBox],
+    ) -> List[GroupBoundingBox]:
+        """
+        Adjust group boxes to ensure they don't touch or overlap.
+
+        This method adds spacing between group boxes that would otherwise
+        touch or overlap. It modifies the padding/position to ensure
+        at least `group_box_spacing` characters between adjacent groups.
+
+        Args:
+            group_boxes: List of GroupBoundingBox objects
+
+        Returns:
+            Adjusted list of GroupBoundingBox objects with proper spacing
+        """
+        if len(group_boxes) <= 1:
+            return group_boxes
+
+        # Check each pair of group boxes and calculate needed adjustments
+        adjusted_boxes = []
+
+        for i, box in enumerate(group_boxes):
+            # Start with the current box dimensions
+            new_x = box.x
+            new_y = box.y
+            new_width = box.width
+            new_height = box.height
+
+            # Check against all other boxes for overlap/touching
+            for j, other_box in enumerate(group_boxes):
+                if i == j:
+                    continue
+
+                # Calculate the current separation (or overlap)
+                # Horizontal overlap check
+                box_right = new_x + new_width
+                other_right = other_box.x + other_box.width
+
+                # Vertical overlap check
+                box_bottom = new_y + new_height
+                other_bottom = other_box.y + other_box.height
+
+                # Check if boxes overlap or touch horizontally AND vertically
+                h_overlap = (
+                    new_x < other_right + self.group_box_spacing
+                    and box_right > other_box.x - self.group_box_spacing
+                )
+                v_overlap = (
+                    new_y < other_bottom + self.group_box_spacing
+                    and box_bottom > other_box.y - self.group_box_spacing
+                )
+
+                if h_overlap and v_overlap:
+                    # Boxes are touching or overlapping - we need to shrink this box
+                    # Determine the best way to separate them
+
+                    # Calculate overlap amounts
+                    # Positive = gap, negative = overlap
+                    h_sep_left = other_box.x - box_right
+                    h_sep_right = new_x - other_right
+                    v_sep_top = other_box.y - box_bottom
+                    v_sep_bottom = new_y - other_bottom
+
+                    # If this box's right edge is near/past other's left edge
+                    if (
+                        h_sep_left < self.group_box_spacing
+                        and new_x < other_box.x
+                        and box_right >= other_box.x - self.group_box_spacing
+                    ):
+                        # Shrink width so right edge is spacing away from other's left
+                        needed_shrink = box_right - (
+                            other_box.x - self.group_box_spacing
+                        )
+                        if needed_shrink > 0:
+                            new_width = max(new_width - needed_shrink, 10)
+
+                    # If this box's bottom edge is near/past other's top edge
+                    if (
+                        v_sep_top < self.group_box_spacing
+                        and new_y < other_box.y
+                        and box_bottom >= other_box.y - self.group_box_spacing
+                    ):
+                        # Shrink height so bottom edge is spacing away from other's top
+                        needed_shrink = box_bottom - (
+                            other_box.y - self.group_box_spacing
+                        )
+                        if needed_shrink > 0:
+                            new_height = max(new_height - needed_shrink, 5)
+
+                    # If this box's left edge is near/past other's right edge
+                    if (
+                        h_sep_right < self.group_box_spacing
+                        and new_x > other_box.x
+                        and new_x <= other_right + self.group_box_spacing
+                    ):
+                        # Move left edge and shrink width
+                        needed_move = (other_right + self.group_box_spacing) - new_x
+                        if needed_move > 0:
+                            new_x += needed_move
+                            new_width = max(new_width - needed_move, 10)
+
+                    # If this box's top edge is near/past other's bottom edge
+                    if (
+                        v_sep_bottom < self.group_box_spacing
+                        and new_y > other_box.y
+                        and new_y <= other_bottom + self.group_box_spacing
+                    ):
+                        # Move top edge and shrink height
+                        needed_move = (other_bottom + self.group_box_spacing) - new_y
+                        if needed_move > 0:
+                            new_y += needed_move
+                            new_height = max(new_height - needed_move, 5)
+
+            adjusted_boxes.append(
+                GroupBoundingBox(
+                    group=box.group,
+                    x=new_x,
+                    y=new_y,
+                    width=new_width,
+                    height=new_height,
+                    label_height=box.label_height,
+                )
+            )
+
+        return adjusted_boxes
+
+    def _draw_group_boxes(
+        self,
+        canvas: Canvas,
+        group_boxes: List[GroupBoundingBox],
+    ) -> None:
+        """
+        Draw all group boxes on the canvas.
+
+        Group boxes are drawn before node boxes so that nodes appear on top.
+
+        Args:
+            canvas: The canvas to draw on
+            group_boxes: List of GroupBoundingBox objects
+        """
+        for group_box in group_boxes:
+            self.group_box_renderer.draw_group_box(
+                canvas,
+                group_box.x,
+                group_box.y,
+                group_box.width,
+                group_box.height,
+                group_box.group.name,
+            )
+
     def _draw_boxes(
         self,
         canvas: Canvas,
@@ -936,8 +1258,9 @@ class FlowchartGenerator:
             # Corner turning down to target (line comes from right, exits down)
             canvas.set(tgt_port_x, tgt_mid_y, LINE_CHARS["corner_top_left"])
 
-            # Vertical to target
-            self._draw_vertical_line(canvas, tgt_port_x, tgt_mid_y + 1, end_y - 2)
+            # Vertical to target (only if there's space between corner and arrow)
+            if tgt_mid_y + 1 <= end_y - 2:
+                self._draw_vertical_line(canvas, tgt_port_x, tgt_mid_y + 1, end_y - 2)
 
             # Arrow
             canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
@@ -956,23 +1279,25 @@ class FlowchartGenerator:
             # Vertical from source to mid
             self._draw_vertical_line(canvas, src_port_x, start_y, mid_y - 1)
 
-            # Corner at source column
+            # Corner at source column (use smart corner setter for fan-out merging)
             if tgt_port_x > src_port_x:
-                canvas.set(src_port_x, mid_y, LINE_CHARS["corner_bottom_left"])
+                self._set_corner(canvas, src_port_x, mid_y, "bottom_left")
             else:
-                canvas.set(src_port_x, mid_y, LINE_CHARS["corner_bottom_right"])
+                self._set_corner(canvas, src_port_x, mid_y, "bottom_right")
 
             # Horizontal segment
             self._draw_horizontal_line(canvas, src_port_x, tgt_port_x, mid_y)
 
-            # Corner at target column
+            # Corner at target column (use smart corner setter for fan-in merging)
             if tgt_port_x > src_port_x:
-                canvas.set(tgt_port_x, mid_y, LINE_CHARS["corner_top_right"])
+                self._set_corner(canvas, tgt_port_x, mid_y, "top_right")
             else:
-                canvas.set(tgt_port_x, mid_y, LINE_CHARS["corner_top_left"])
+                self._set_corner(canvas, tgt_port_x, mid_y, "top_left")
 
             # Vertical from mid to target (stop before arrow position)
-            self._draw_vertical_line(canvas, tgt_port_x, mid_y + 1, end_y - 2)
+            # Only draw if there's actually space between the corner and the arrow
+            if mid_y + 1 <= end_y - 2:
+                self._draw_vertical_line(canvas, tgt_port_x, mid_y + 1, end_y - 2)
 
             # Draw arrow one row above target box (doesn't overwrite border)
             canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
@@ -1061,6 +1386,25 @@ class FlowchartGenerator:
             current = canvas.get(x, y)
             if current == LINE_CHARS["horizontal"]:
                 canvas.set(x, y, LINE_CHARS["cross"])
+            elif current in (
+                LINE_CHARS["corner_top_left"],
+                LINE_CHARS["corner_bottom_left"],
+            ):
+                # Corners with "right" segment + vertical = tee_right
+                # corner_top_left (┌) has: down, right → + up, down = tee_right (├)
+                # corner_bottom_left (└) has: up, right → + up, down = tee_right (├)
+                canvas.set(x, y, LINE_CHARS["tee_right"])
+            elif current in (
+                LINE_CHARS["corner_top_right"],
+                LINE_CHARS["corner_bottom_right"],
+            ):
+                # Corners with "left" segment + vertical = tee_left
+                # corner_top_right (┐) has: down, left → + up, down = tee_left (┤)
+                # corner_bottom_right (┘) has: up, left → + up, down = tee_left (┤)
+                canvas.set(x, y, LINE_CHARS["tee_left"])
+            elif current in (LINE_CHARS["tee_up"], LINE_CHARS["tee_down"]):
+                # Tees with horizontal segments + vertical = cross
+                canvas.set(x, y, LINE_CHARS["cross"])
             elif current == " " or current == BOX_CHARS["shadow"]:
                 canvas.set(x, y, LINE_CHARS["vertical"])
 
@@ -1075,8 +1419,119 @@ class FlowchartGenerator:
             current = canvas.get(x, y)
             if current == LINE_CHARS["vertical"]:
                 canvas.set(x, y, LINE_CHARS["cross"])
+            elif current in (
+                LINE_CHARS["corner_top_left"],
+                LINE_CHARS["corner_top_right"],
+            ):
+                # Corners with "down" segment + horizontal = tee_down
+                # corner_top_left (┌) has: down, right → + left, right = tee_down (┬)
+                # corner_top_right (┐) has: down, left → + left, right = tee_down (┬)
+                canvas.set(x, y, LINE_CHARS["tee_down"])
+            elif current in (
+                LINE_CHARS["corner_bottom_left"],
+                LINE_CHARS["corner_bottom_right"],
+            ):
+                # Corners with "up" segment + horizontal = tee_up
+                # corner_bottom_left (└) has: up, right → + left, right = tee_up (┴)
+                # corner_bottom_right (┘) has: up, left → + left, right = tee_up (┴)
+                canvas.set(x, y, LINE_CHARS["tee_up"])
+            elif current in (LINE_CHARS["tee_right"], LINE_CHARS["tee_left"]):
+                # Tees with vertical segments + horizontal = cross
+                canvas.set(x, y, LINE_CHARS["cross"])
+            elif current in (LINE_CHARS["tee_up"], LINE_CHARS["tee_down"]):
+                # These tees already have horizontal connectivity, no change needed
+                pass
+            elif current == LINE_CHARS["horizontal"]:
+                # Already horizontal, no change needed
+                pass
             elif current == " " or current == BOX_CHARS["shadow"]:
                 canvas.set(x, y, LINE_CHARS["horizontal"])
+
+    def _set_corner(self, canvas: Canvas, x: int, y: int, corner_type: str) -> None:
+        """
+        Set a corner character at position (x, y), handling existing content.
+
+        If there's already a line at this position, the corner is upgraded to
+        the appropriate junction character (tee or cross).
+
+        Args:
+            canvas: The canvas to draw on
+            x: X position
+            y: Y position
+            corner_type: One of 'top_left', 'top_right', 'bottom_left', 'bottom_right'
+        """
+        current = canvas.get(x, y)
+        corner_char = LINE_CHARS[f"corner_{corner_type}"]
+
+        if current in (" ", BOX_CHARS["shadow"]):
+            canvas.set(x, y, corner_char)
+        elif current == LINE_CHARS["horizontal"]:
+            # Horizontal line + corner = tee pointing up or down
+            if "top" in corner_type:
+                canvas.set(x, y, LINE_CHARS["tee_down"])
+            else:
+                canvas.set(x, y, LINE_CHARS["tee_up"])
+        elif current == LINE_CHARS["vertical"]:
+            # Vertical line + corner = tee pointing left or right
+            if "left" in corner_type:
+                canvas.set(x, y, LINE_CHARS["tee_right"])
+            else:
+                canvas.set(x, y, LINE_CHARS["tee_left"])
+        elif current in (
+            LINE_CHARS["corner_top_left"],
+            LINE_CHARS["corner_top_right"],
+            LINE_CHARS["corner_bottom_left"],
+            LINE_CHARS["corner_bottom_right"],
+        ):
+            # Corner + corner = appropriate tee based on combined segments
+            # Each corner has specific segments; combine them to get the right tee
+            # Segments: top_left (down,right), top_right (down,left),
+            #           bottom_left (up,right), bottom_right (up,left)
+            segments = set()
+
+            # Add segments from existing corner
+            if current == LINE_CHARS["corner_top_left"]:
+                segments.update(["down", "right"])
+            elif current == LINE_CHARS["corner_top_right"]:
+                segments.update(["down", "left"])
+            elif current == LINE_CHARS["corner_bottom_left"]:
+                segments.update(["up", "right"])
+            elif current == LINE_CHARS["corner_bottom_right"]:
+                segments.update(["up", "left"])
+
+            # Add segments from new corner
+            if corner_type == "top_left":
+                segments.update(["down", "right"])
+            elif corner_type == "top_right":
+                segments.update(["down", "left"])
+            elif corner_type == "bottom_left":
+                segments.update(["up", "right"])
+            elif corner_type == "bottom_right":
+                segments.update(["up", "left"])
+
+            # Determine result based on combined segments
+            if segments == {"up", "down", "left", "right"}:
+                canvas.set(x, y, LINE_CHARS["cross"])
+            elif segments == {"up", "down", "right"}:
+                canvas.set(x, y, LINE_CHARS["tee_right"])
+            elif segments == {"up", "down", "left"}:
+                canvas.set(x, y, LINE_CHARS["tee_left"])
+            elif segments == {"up", "left", "right"}:
+                canvas.set(x, y, LINE_CHARS["tee_up"])
+            elif segments == {"down", "left", "right"}:
+                canvas.set(x, y, LINE_CHARS["tee_down"])
+            else:
+                # Same corner or incomplete, keep the corner
+                canvas.set(x, y, corner_char)
+        elif current in (
+            LINE_CHARS["tee_left"],
+            LINE_CHARS["tee_right"],
+            LINE_CHARS["tee_up"],
+            LINE_CHARS["tee_down"],
+        ):
+            # Tee + corner = cross (tee already has 3 segments, adding any new = 4)
+            canvas.set(x, y, LINE_CHARS["cross"])
+        # else: leave existing character (arrows, box chars, etc.)
 
     def _draw_back_edges(
         self,
@@ -1368,14 +1823,22 @@ class FlowchartGenerator:
         tgt_x, tgt_y = box_positions[target]
 
         # Check if boxes overlap vertically (inside borders)
+        # For compact boxes (height 3), there's only one content row at y+1
         src_top = src_y + 1
         src_bottom = src_y + src_dims.height - 2
         tgt_top = tgt_y + 1
         tgt_bottom = tgt_y + tgt_dims.height - 2
 
+        # Ensure bottom >= top for single-row content
+        if src_bottom < src_top:
+            src_bottom = src_top
+        if tgt_bottom < tgt_top:
+            tgt_bottom = tgt_top
+
         overlap_top = max(src_top, tgt_top)
         overlap_bottom = min(src_bottom, tgt_bottom)
-        has_overlap = overlap_top < overlap_bottom
+        # Use <= to include single-row overlap (compact boxes)
+        has_overlap = overlap_top <= overlap_bottom
 
         # Check if there are boxes in intermediate columns that would block the path
         boxes_in_path = False
@@ -1402,13 +1865,18 @@ class FlowchartGenerator:
                 t_x, t_y = box_positions[t]
                 t_top = t_y + 1
                 t_bottom = t_y + t_dims.height - 2
+                # Adjust for compact boxes with single content row
+                if t_bottom < t_top:
+                    t_bottom = t_top
                 t_overlap_top = max(src_top, t_top)
                 t_overlap_bottom = min(src_bottom, t_bottom)
-                if t_overlap_top < t_overlap_bottom:
+                # Use <= for single-row overlap (compact boxes)
+                if t_overlap_top <= t_overlap_bottom:
                     overlapping_targets.append(t)
 
             # Distribute ports within the overlap region
-            overlap_height = overlap_bottom - overlap_top
+            # For compact boxes, overlap_height may be 0, so use at least 1
+            overlap_height = max(1, overlap_bottom - overlap_top)
             overlap_count = len(overlapping_targets)
             overlap_idx = overlapping_targets.index(target)
 
@@ -1471,14 +1939,14 @@ class FlowchartGenerator:
             # Horizontal from source to mid
             self._draw_horizontal_line(canvas, start_x - 1, mid_x, src_port_y)
 
-            # Corner turning down
-            canvas.set(mid_x, src_port_y, LINE_CHARS["corner_top_right"])
+            # Corner turning down (use smart corner setter)
+            self._set_corner(canvas, mid_x, src_port_y, "top_right")
 
             # Vertical segment down to route_y
             self._draw_vertical_line(canvas, mid_x, src_port_y + 1, route_y - 1)
 
-            # Corner turning right
-            canvas.set(mid_x, route_y, LINE_CHARS["corner_bottom_left"])
+            # Corner turning right (use smart corner setter)
+            self._set_corner(canvas, mid_x, route_y, "bottom_left")
 
             # Find the x position for the vertical segment before the target
             tgt_mid_x = self._get_safe_vertical_x(
@@ -1488,14 +1956,14 @@ class FlowchartGenerator:
             # Horizontal segment below boxes
             self._draw_horizontal_line(canvas, mid_x, tgt_mid_x, route_y)
 
-            # Corner turning up
-            canvas.set(tgt_mid_x, route_y, LINE_CHARS["corner_bottom_right"])
+            # Corner turning up (use smart corner setter)
+            self._set_corner(canvas, tgt_mid_x, route_y, "bottom_right")
 
             # Vertical segment up toward target
             self._draw_vertical_line(canvas, tgt_mid_x, tgt_port_y + 1, route_y - 1)
 
-            # Corner turning right to target
-            canvas.set(tgt_mid_x, tgt_port_y, LINE_CHARS["corner_top_left"])
+            # Corner turning right to target (use smart corner setter)
+            self._set_corner(canvas, tgt_mid_x, tgt_port_y, "top_left")
 
             # Horizontal to target
             self._draw_horizontal_line(canvas, tgt_mid_x, end_x - 1, tgt_port_y)
@@ -1521,20 +1989,26 @@ class FlowchartGenerator:
             # mid_x so line ends at mid_x - 1 (just before the corner at mid_x)
             self._draw_horizontal_line(canvas, start_x - 1, mid_x, src_port_y)
 
-            # Corner at source row
+            # Corner at source row (use smart corner setter for proper junctions)
             if tgt_port_y > src_port_y:
-                canvas.set(mid_x, src_port_y, LINE_CHARS["corner_top_right"])
+                self._set_corner(canvas, mid_x, src_port_y, "top_right")
             else:
-                canvas.set(mid_x, src_port_y, LINE_CHARS["corner_bottom_right"])
+                self._set_corner(canvas, mid_x, src_port_y, "bottom_right")
 
-            # Vertical segment
-            self._draw_vertical_line(canvas, mid_x, src_port_y, tgt_port_y)
-
-            # Corner at target row
+            # Vertical segment (draw between corners, not including corner positions)
+            # Only draw if there's actually space between the corners
             if tgt_port_y > src_port_y:
-                canvas.set(mid_x, tgt_port_y, LINE_CHARS["corner_bottom_left"])
+                if src_port_y + 1 <= tgt_port_y - 1:
+                    self._draw_vertical_line(canvas, mid_x, src_port_y + 1, tgt_port_y - 1)
             else:
-                canvas.set(mid_x, tgt_port_y, LINE_CHARS["corner_top_left"])
+                if tgt_port_y + 1 <= src_port_y - 1:
+                    self._draw_vertical_line(canvas, mid_x, tgt_port_y + 1, src_port_y - 1)
+
+            # Corner at target row (use smart corner setter for proper junctions)
+            if tgt_port_y > src_port_y:
+                self._set_corner(canvas, mid_x, tgt_port_y, "bottom_left")
+            else:
+                self._set_corner(canvas, mid_x, tgt_port_y, "top_left")
 
             # Horizontal from mid to target
             # Adjust for exclusive endpoints: mid_x so line begins at mid_x + 1,
@@ -1548,12 +2022,28 @@ class FlowchartGenerator:
         self, box_y: int, box_height: int, port_idx: int, port_count: int
     ) -> int:
         """Calculate y position for a port on a box (horizontal mode)."""
-        if port_count == 1:
-            return box_y + box_height // 2
+        # Content rows are between top and bottom borders
+        # For compact box (height 3): only row box_y + 1 is content
+        # For non-compact box (height 5+): rows box_y + 2 to box_y + height - 3
+        content_top = box_y + 1
+        content_bottom = box_y + box_height - 2
+
+        # Ensure we have at least one valid row
+        if content_bottom < content_top:
+            content_bottom = content_top
+
+        content_height = content_bottom - content_top + 1
+
+        if port_count == 1 or content_height == 1:
+            # Single port or single content row: use middle of content area
+            return content_top + content_height // 2
         else:
-            usable_height = box_height - 4
-            spacing = usable_height // (port_count + 1)
-            return box_y + 2 + spacing * (port_idx + 1)
+            # Multiple ports: distribute across content rows
+            # Ensure spacing is at least 1 to avoid overlapping ports
+            spacing = max(1, content_height // (port_count + 1))
+            port_y = content_top + spacing * (port_idx + 1)
+            # Clamp to valid content range
+            return min(max(port_y, content_top), content_bottom)
 
     def _draw_back_edges_horizontal(
         self,

@@ -988,3 +988,183 @@ class TestFlowchartGeneratorHorizontalMode:
         assert "End" in result
         for node in ["A", "B", "C", "D"]:
             assert node in result
+
+
+class TestFlowchartGeneratorGroups:
+    """Tests for FlowchartGenerator group box feature."""
+
+    def test_generate_with_single_group(self):
+        """Test generation with a single group."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [MyGroup: A B]
+        A -> B
+        B -> C
+        """
+        result = gen.generate(input_text)
+        assert "A" in result
+        assert "B" in result
+        assert "C" in result
+        assert "MyGroup" in result
+
+    def test_generate_with_multiple_groups(self):
+        """Test generation with multiple groups."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Group1: A B]
+        [Group2: C D]
+        A -> B
+        B -> C
+        C -> D
+        """
+        result = gen.generate(input_text)
+        assert "Group1" in result
+        assert "Group2" in result
+
+    def test_generate_group_tb_mode(self):
+        """Test group boxes in TB (top-bottom) mode."""
+        gen = FlowchartGenerator(direction="TB")
+        input_text = """
+        [Pipeline: A B C]
+        A -> B
+        B -> C
+        """
+        result = gen.generate(input_text)
+        assert "Pipeline" in result
+        assert "A" in result
+        assert "C" in result
+
+    def test_generate_group_lr_mode(self):
+        """Test group boxes in LR (left-right) mode."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = """
+        [Pipeline: A B C]
+        A -> B
+        B -> C
+        """
+        result = gen.generate(input_text)
+        assert "Pipeline" in result
+        assert "A" in result
+        assert "C" in result
+
+    def test_generate_group_with_title(self):
+        """Test group boxes combined with title."""
+        gen = FlowchartGenerator(title="Flowchart Title")
+        input_text = """
+        [MyGroup: A B]
+        A -> B
+        """
+        result = gen.generate(input_text)
+        assert "Flowchart Title" in result
+        assert "MyGroup" in result
+
+    def test_generate_group_with_nonexistent_nodes(self):
+        """Test that group with nonexistent nodes is handled gracefully."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [MyGroup: X Y Z]
+        A -> B
+        """
+        # Should not crash, group should be skipped or handled gracefully
+        result = gen.generate(input_text)
+        assert "A" in result
+        assert "B" in result
+
+    def test_generate_group_partial_nodes(self):
+        """Test group that includes only some existing nodes."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [MyGroup: A]
+        A -> B
+        B -> C
+        """
+        result = gen.generate(input_text)
+        assert "MyGroup" in result
+        assert "A" in result
+        assert "B" in result
+
+    def test_generate_overlapping_groups(self):
+        """Test multiple groups that might overlap."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Group1: A B]
+        [Group2: B C]
+        A -> B
+        B -> C
+        """
+        result = gen.generate(input_text)
+        # Both groups should appear
+        assert "Group1" in result
+        assert "Group2" in result
+
+    def test_generate_group_uses_single_line_border(self):
+        """Test that group boxes use single-line border characters."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [MyGroup: A B]
+        A -> B
+        """
+        result = gen.generate(input_text)
+        # Group box uses single-line borders (BOX_CHARS)
+        assert BOX_CHARS["top_left"] in result
+        assert BOX_CHARS["top_right"] in result
+
+    def test_calculate_group_bounding_boxes(self):
+        """Test _calculate_group_bounding_boxes method."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [MyGroup: A B]
+        A -> B
+        """
+        connections = gen.parser.parse(input_text)
+        groups = gen.parser.groups
+        layout_result = gen.layout_engine.layout(connections, groups)
+        box_dimensions = gen._calculate_all_box_dimensions(layout_result)
+        box_positions = gen._calculate_positions(layout_result, box_dimensions)
+
+        group_boxes = gen._calculate_group_bounding_boxes(
+            layout_result, box_dimensions, box_positions
+        )
+
+        assert len(group_boxes) == 1
+        assert group_boxes[0].group.name == "MyGroup"
+        assert group_boxes[0].width > 0
+        assert group_boxes[0].height > 0
+
+    def test_draw_group_boxes(self):
+        """Test _draw_group_boxes method via full generation."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [TestGroup: A B]
+        A -> B
+        """
+        # Use full generate to ensure proper canvas setup
+        result = gen.generate(input_text)
+        assert "TestGroup" in result
+
+    def test_group_with_cycles(self):
+        """Test group boxes work with cyclic graphs."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Loop: A B C]
+        A -> B
+        B -> C
+        C -> A
+        """
+        result = gen.generate(input_text)
+        assert "Loop" in result
+        assert "A" in result
+        assert "C" in result
+
+    def test_group_with_branching(self):
+        """Test group boxes work with branching."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Parallel: B C]
+        A -> B
+        A -> C
+        B -> D
+        C -> D
+        """
+        result = gen.generate(input_text)
+        assert "Parallel" in result

@@ -9,9 +9,12 @@ Uses networkx for:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Set, Tuple
 
 import networkx as nx
+
+if TYPE_CHECKING:
+    from .parser import Group
 
 
 @dataclass
@@ -36,6 +39,7 @@ class LayoutResult:
     edges: List[Tuple[str, str]] = field(default_factory=list)
     back_edges: Set[Tuple[str, str]] = field(default_factory=set)
     has_cycles: bool = False
+    groups: List["Group"] = field(default_factory=list)
 
 
 class NetworkXLayout:
@@ -50,16 +54,23 @@ class NetworkXLayout:
         self.graph: nx.DiGraph = None
         self.back_edges: Set[Tuple[str, str]] = set()
 
-    def layout(self, connections: List[Tuple[str, str]]) -> LayoutResult:
+    def layout(
+        self,
+        connections: List[Tuple[str, str]],
+        groups: List["Group"] = None,
+    ) -> LayoutResult:
         """
         Compute layout for the given connections.
 
         Args:
             connections: List of (source, target) tuples
+            groups: Optional list of Group objects for grouping nodes
 
         Returns:
             LayoutResult with node positions and layer assignments
         """
+        if groups is None:
+            groups = []
         # Build networkx graph
         self.graph = nx.DiGraph()
         self.graph.add_edges_from(connections)
@@ -84,6 +95,7 @@ class NetworkXLayout:
         result.back_edges = self.back_edges
         result.layers = layers
         result.edges = list(connections)
+        result.groups = groups
 
         # Create node layouts
         for layer_idx, layer in enumerate(layers):
