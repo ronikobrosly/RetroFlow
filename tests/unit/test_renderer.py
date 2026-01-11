@@ -119,7 +119,8 @@ class TestBoxRenderer:
         """Test BoxRenderer creation with defaults."""
         br = BoxRenderer()
         assert br.max_text_width == 20
-        assert br.padding == 2
+        # Default is compact mode (padding=1)
+        assert br.padding == 1
         assert br.shadow is True
 
     def test_box_renderer_custom_params(self):
@@ -133,7 +134,8 @@ class TestBoxRenderer:
         """Test box dimensions for short text."""
         dims = box_renderer.calculate_box_dimensions("Hi")
         assert dims.text_lines == ["Hi"]
-        assert dims.height == 5  # 1 text line + 2 borders + 2 vertical padding
+        # In compact mode (default): 1 text line + 2 borders = 3
+        assert dims.height == 3
 
     def test_calculate_box_dimensions_longer_text(self, box_renderer):
         """Test box dimensions for longer text that wraps."""
@@ -599,22 +601,22 @@ class TestGroupBoxRenderer:
         assert canvas.get(19, 9) == BOX_CHARS["bottom_right"]
 
     def test_draw_group_box_borders(self, canvas):
-        """Test that group box draws correct horizontal borders."""
+        """Test that group box draws correct horizontal borders (dotted style)."""
         gbr = GroupBoxRenderer()
         gbr.draw_group_box(canvas, 0, 0, 20, 10, "Test")
 
-        # Check horizontal borders
-        assert canvas.get(1, 0) == BOX_CHARS["horizontal"]
-        assert canvas.get(1, 9) == BOX_CHARS["horizontal"]
+        # Group boxes use dotted lines for borders (not solid lines)
+        assert canvas.get(1, 0) == "."
+        assert canvas.get(1, 9) == "."
 
     def test_draw_group_box_sides(self, canvas):
-        """Test that group box draws correct vertical sides."""
+        """Test that group box draws correct vertical sides (dotted style)."""
         gbr = GroupBoxRenderer()
         gbr.draw_group_box(canvas, 0, 0, 20, 10, "Test")
 
-        # Check vertical sides
-        assert canvas.get(0, 1) == BOX_CHARS["vertical"]
-        assert canvas.get(19, 1) == BOX_CHARS["vertical"]
+        # Group boxes use dotted lines for sides (not solid lines)
+        assert canvas.get(0, 1) == "."
+        assert canvas.get(19, 1) == "."
 
     def test_draw_group_box_label_present(self, canvas):
         """Test that group box label is drawn."""

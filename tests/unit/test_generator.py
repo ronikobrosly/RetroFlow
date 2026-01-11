@@ -506,7 +506,7 @@ class TestFlowchartGeneratorLoadFont:
 
     def test_load_font_returns_font(self, generator):
         """Test that _load_monospace_font returns a font object."""
-        font = generator._load_monospace_font(16)
+        font = generator.exporter._load_monospace_font(16)
         assert font is not None
         # Should be able to get bounding box
         bbox = font.getbbox("M")
@@ -515,8 +515,8 @@ class TestFlowchartGeneratorLoadFont:
 
     def test_load_font_respects_size(self, generator):
         """Test that different font sizes produce different bbox sizes."""
-        font_small = generator._load_monospace_font(12)
-        font_large = generator._load_monospace_font(24)
+        font_small = generator.exporter._load_monospace_font(12)
+        font_large = generator.exporter._load_monospace_font(24)
 
         bbox_small = font_small.getbbox("M")
         bbox_large = font_large.getbbox("M")
@@ -528,7 +528,7 @@ class TestFlowchartGeneratorLoadFont:
 
     def test_load_font_with_invalid_name(self, generator):
         """Test that invalid font name falls through to system fonts."""
-        font = generator._load_monospace_font(16, "NonexistentFont12345")
+        font = generator.exporter._load_monospace_font(16, "NonexistentFont12345")
         assert font is not None
         # Should still be usable
         bbox = font.getbbox("M")
@@ -537,7 +537,7 @@ class TestFlowchartGeneratorLoadFont:
     def test_load_font_with_valid_name(self, generator):
         """Test loading font by name."""
         # Try a font that should exist on most systems
-        font = generator._load_monospace_font(16, "DejaVu Sans Mono")
+        font = generator.exporter._load_monospace_font(16, "DejaVu Sans Mono")
         assert font is not None
         bbox = font.getbbox("M")
         assert bbox is not None
@@ -547,12 +547,14 @@ class TestFlowchartGeneratorInternalMethods:
     """Tests for FlowchartGenerator internal methods."""
 
     def test_calculate_all_box_dimensions(self, generator):
-        """Test _calculate_all_box_dimensions method."""
+        """Test calculate_all_box_dimensions method."""
         input_text = "A -> B"
         connections = generator.parser.parse(input_text)
         layout_result = generator.layout_engine.layout(connections)
 
-        dimensions = generator._calculate_all_box_dimensions(layout_result)
+        dimensions = generator.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
 
         assert "A" in dimensions
         assert "B" in dimensions
@@ -566,19 +568,25 @@ class TestFlowchartGeneratorInternalMethods:
         connections = generator.parser.parse(input_text)
         layout_result = generator.layout_engine.layout(connections)
 
-        dimensions = generator._calculate_all_box_dimensions(layout_result)
+        dimensions = generator.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
 
         assert dimensions["X"].width >= generator.min_box_width
         assert dimensions["Y"].width >= generator.min_box_width
 
     def test_calculate_positions(self, generator):
-        """Test _calculate_positions method."""
+        """Test calculate_positions method."""
         input_text = "A -> B\nB -> C"
         connections = generator.parser.parse(input_text)
         layout_result = generator.layout_engine.layout(connections)
-        box_dimensions = generator._calculate_all_box_dimensions(layout_result)
+        box_dimensions = generator.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
 
-        positions = generator._calculate_positions(layout_result, box_dimensions)
+        positions = generator.position_calculator.calculate_positions(
+            layout_result, box_dimensions
+        )
 
         assert "A" in positions
         assert "B" in positions
@@ -590,16 +598,18 @@ class TestFlowchartGeneratorInternalMethods:
             assert len(pos) == 2
 
     def test_calculate_positions_with_margin(self, generator):
-        """Test _calculate_positions with left margin."""
+        """Test calculate_positions with left margin."""
         input_text = "A -> B"
         connections = generator.parser.parse(input_text)
         layout_result = generator.layout_engine.layout(connections)
-        box_dimensions = generator._calculate_all_box_dimensions(layout_result)
+        box_dimensions = generator.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
 
-        positions_no_margin = generator._calculate_positions(
+        positions_no_margin = generator.position_calculator.calculate_positions(
             layout_result, box_dimensions, left_margin=0
         )
-        positions_with_margin = generator._calculate_positions(
+        positions_with_margin = generator.position_calculator.calculate_positions(
             layout_result, box_dimensions, left_margin=10
         )
 
@@ -608,37 +618,43 @@ class TestFlowchartGeneratorInternalMethods:
             assert positions_with_margin[name][0] >= positions_no_margin[name][0]
 
     def test_calculate_canvas_size(self, generator):
-        """Test _calculate_canvas_size method."""
+        """Test calculate_canvas_size method."""
         input_text = "A -> B"
         connections = generator.parser.parse(input_text)
         layout_result = generator.layout_engine.layout(connections)
-        box_dimensions = generator._calculate_all_box_dimensions(layout_result)
-        box_positions = generator._calculate_positions(layout_result, box_dimensions)
+        box_dimensions = generator.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
+        box_positions = generator.position_calculator.calculate_positions(
+            layout_result, box_dimensions
+        )
 
-        width, height = generator._calculate_canvas_size(box_dimensions, box_positions)
+        width, height = generator.position_calculator.calculate_canvas_size(
+            box_dimensions, box_positions
+        )
 
         assert width > 0
         assert height > 0
 
     def test_calculate_port_x_single(self, generator):
-        """Test _calculate_port_x for single port."""
+        """Test calculate_port_x for single port."""
         box_x = 10
         box_width = 20
 
-        port_x = generator._calculate_port_x(box_x, box_width, 0, 1)
+        port_x = generator.position_calculator.calculate_port_x(box_x, box_width, 0, 1)
 
         # Single port should be centered
         expected_center = box_x + box_width // 2
         assert port_x == expected_center
 
     def test_calculate_port_x_multiple(self, generator):
-        """Test _calculate_port_x for multiple ports."""
+        """Test calculate_port_x for multiple ports."""
         box_x = 10
         box_width = 20
 
-        port_x_0 = generator._calculate_port_x(box_x, box_width, 0, 3)
-        port_x_1 = generator._calculate_port_x(box_x, box_width, 1, 3)
-        port_x_2 = generator._calculate_port_x(box_x, box_width, 2, 3)
+        port_x_0 = generator.position_calculator.calculate_port_x(box_x, box_width, 0, 3)
+        port_x_1 = generator.position_calculator.calculate_port_x(box_x, box_width, 1, 3)
+        port_x_2 = generator.position_calculator.calculate_port_x(box_x, box_width, 2, 3)
 
         # Ports should be distributed
         assert port_x_0 < port_x_1 < port_x_2
@@ -895,14 +911,16 @@ class TestFlowchartGeneratorHorizontalMode:
         assert lr_width > tb_width
 
     def test_horizontal_mode_calculate_positions(self):
-        """Test _calculate_positions_horizontal method."""
+        """Test calculate_positions_horizontal method."""
         gen = FlowchartGenerator(direction="LR")
         input_text = "A -> B"
         connections = gen.parser.parse(input_text)
         layout_result = gen.layout_engine.layout(connections)
-        box_dimensions = gen._calculate_all_box_dimensions(layout_result)
+        box_dimensions = gen.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
 
-        positions = gen._calculate_positions_horizontal(
+        positions = gen.position_calculator.calculate_positions_horizontal(
             layout_result, box_dimensions, top_margin=0
         )
 
@@ -912,17 +930,19 @@ class TestFlowchartGeneratorHorizontalMode:
         assert positions["A"][0] < positions["B"][0]
 
     def test_horizontal_mode_with_margin(self):
-        """Test _calculate_positions_horizontal with top margin."""
+        """Test calculate_positions_horizontal with top margin."""
         gen = FlowchartGenerator(direction="LR")
         input_text = "A -> B"
         connections = gen.parser.parse(input_text)
         layout_result = gen.layout_engine.layout(connections)
-        box_dimensions = gen._calculate_all_box_dimensions(layout_result)
+        box_dimensions = gen.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
 
-        positions_no_margin = gen._calculate_positions_horizontal(
+        positions_no_margin = gen.position_calculator.calculate_positions_horizontal(
             layout_result, box_dimensions, top_margin=0
         )
-        positions_with_margin = gen._calculate_positions_horizontal(
+        positions_with_margin = gen.position_calculator.calculate_positions_horizontal(
             layout_result, box_dimensions, top_margin=10
         )
 
@@ -931,26 +951,26 @@ class TestFlowchartGeneratorHorizontalMode:
             assert positions_with_margin[name][1] >= positions_no_margin[name][1]
 
     def test_calculate_port_y_single(self):
-        """Test _calculate_port_y for single port."""
+        """Test calculate_port_y for single port."""
         gen = FlowchartGenerator(direction="LR")
         box_y = 10
         box_height = 20
 
-        port_y = gen._calculate_port_y(box_y, box_height, 0, 1)
+        port_y = gen.position_calculator.calculate_port_y(box_y, box_height, 0, 1)
 
         # Single port should be centered
         expected_center = box_y + box_height // 2
         assert port_y == expected_center
 
     def test_calculate_port_y_multiple(self):
-        """Test _calculate_port_y for multiple ports."""
+        """Test calculate_port_y for multiple ports."""
         gen = FlowchartGenerator(direction="LR")
         box_y = 10
         box_height = 20
 
-        port_y_0 = gen._calculate_port_y(box_y, box_height, 0, 3)
-        port_y_1 = gen._calculate_port_y(box_y, box_height, 1, 3)
-        port_y_2 = gen._calculate_port_y(box_y, box_height, 2, 3)
+        port_y_0 = gen.position_calculator.calculate_port_y(box_y, box_height, 0, 3)
+        port_y_1 = gen.position_calculator.calculate_port_y(box_y, box_height, 1, 3)
+        port_y_2 = gen.position_calculator.calculate_port_y(box_y, box_height, 2, 3)
 
         # Ports should be distributed vertically
         assert port_y_0 < port_y_1 < port_y_2
@@ -1110,7 +1130,7 @@ class TestFlowchartGeneratorGroups:
         assert BOX_CHARS["top_right"] in result
 
     def test_calculate_group_bounding_boxes(self):
-        """Test _calculate_group_bounding_boxes method."""
+        """Test calculate_group_bounding_boxes method."""
         gen = FlowchartGenerator()
         input_text = """
         [MyGroup: A B]
@@ -1119,10 +1139,14 @@ class TestFlowchartGeneratorGroups:
         connections = gen.parser.parse(input_text)
         groups = gen.parser.groups
         layout_result = gen.layout_engine.layout(connections, groups)
-        box_dimensions = gen._calculate_all_box_dimensions(layout_result)
-        box_positions = gen._calculate_positions(layout_result, box_dimensions)
+        box_dimensions = gen.position_calculator.calculate_all_box_dimensions(
+            layout_result
+        )
+        box_positions = gen.position_calculator.calculate_positions(
+            layout_result, box_dimensions
+        )
 
-        group_boxes = gen._calculate_group_bounding_boxes(
+        group_boxes = gen.position_calculator.calculate_group_bounding_boxes(
             layout_result, box_dimensions, box_positions
         )
 

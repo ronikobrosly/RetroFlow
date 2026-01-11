@@ -104,6 +104,10 @@ retroflow/
 │   ├── layout.py            # NetworkX-based layout with barycenter ordering
 │   ├── renderer.py          # ASCII canvas, box drawing, and line rendering
 │   ├── router.py            # Edge routing utilities (ports, waypoints)
+│   ├── models.py            # Data models (LayerBoundary, ColumnBoundary, GroupBoundingBox)
+│   ├── positioning.py       # Position calculation for nodes and groups
+│   ├── edge_drawing.py      # Edge rendering for TB and LR modes
+│   ├── export.py            # PNG and text file export functionality
 │   └── py.typed             # PEP 561 type marker
 ├── tests/
 │   ├── conftest.py          # Shared pytest fixtures
@@ -118,8 +122,12 @@ retroflow/
 
 | File | Purpose |
 |------|---------|
-| `generator.py` | Main `FlowchartGenerator` class - orchestrates parsing, layout, and rendering |
+| `generator.py` | Main `FlowchartGenerator` class - orchestrates parsing, layout, positioning, edge drawing, and export |
 | `parser.py` | Parses `A -> B` text syntax into connection tuples |
 | `layout.py` | `NetworkXLayout` class using networkx for graph representation, cycle detection, topological sorting, and barycenter-based node ordering. `SugiyamaLayout` is an alias for backwards compatibility. |
 | `renderer.py` | `Canvas` for 2D character grid, `BoxRenderer` for Unicode box drawing with shadows, `LineRenderer` for edge drawing utilities |
 | `router.py` | `EdgeRouter` for port allocation and orthogonal edge routing (utility module for future use) |
+| `models.py` | Data models for layout boundaries and group bounding boxes used throughout the generation process |
+| `positioning.py` | `PositionCalculator` class for calculating node positions, layer/column boundaries, and port positions |
+| `edge_drawing.py` | `EdgeDrawer` class for rendering forward and back edges in TB and LR modes |
+| `export.py` | `FlowchartExporter` class for PNG and text file export with font handling |
