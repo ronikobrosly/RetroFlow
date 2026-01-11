@@ -1148,7 +1148,25 @@ class FlowchartGenerator:
                 if boxes_in_path:
                     break
 
-        if has_overlap and not boxes_in_path:
+        # Check if other targets from this source require fan-out routing
+        # If so, we should use fan-out routing for ALL edges to avoid crossing
+        other_targets_need_fanout = False
+        if len(source_targets) > 1:
+            for t in source_targets:
+                if t == target:
+                    continue
+                t_dims = box_dimensions[t]
+                t_x, _ = box_positions[t]
+                t_left = t_x + 1
+                t_right = t_x + t_dims.width - 2
+                t_overlap_left = max(src_left, t_left)
+                t_overlap_right = min(src_right, t_right)
+                if t_overlap_left >= t_overlap_right:
+                    # This target has no overlap, will use fan-out routing
+                    other_targets_need_fanout = True
+                    break
+
+        if has_overlap and not boxes_in_path and not other_targets_need_fanout:
             # Boxes overlap and no obstructions - find overlapping targets
             overlapping_targets = []
             for t in source_targets:
@@ -1265,8 +1283,9 @@ class FlowchartGenerator:
             # Arrow
             canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
 
-        elif src_port_x == tgt_port_x:
+        elif src_port_x == tgt_port_x and not other_targets_need_fanout:
             # Direct vertical line (stop before arrow position)
+            # Only use direct vertical when there's no fan-out from this source
             self._draw_vertical_line(canvas, src_port_x, start_y, end_y - 2)
             # Draw arrow one row above target box (doesn't overwrite border)
             canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
@@ -1280,7 +1299,11 @@ class FlowchartGenerator:
             self._draw_vertical_line(canvas, src_port_x, start_y, mid_y - 1)
 
             # Corner at source column (use smart corner setter for fan-out merging)
-            if tgt_port_x > src_port_x:
+            if src_port_x == tgt_port_x:
+                # Target is directly below source - use tee_down for fan-out junction
+                # This avoids creating a cross when source and target corners combine
+                canvas.set(src_port_x, mid_y, LINE_CHARS["tee_down"])
+            elif tgt_port_x > src_port_x:
                 self._set_corner(canvas, src_port_x, mid_y, "bottom_left")
             else:
                 self._set_corner(canvas, src_port_x, mid_y, "bottom_right")
@@ -1289,10 +1312,12 @@ class FlowchartGenerator:
             self._draw_horizontal_line(canvas, src_port_x, tgt_port_x, mid_y)
 
             # Corner at target column (use smart corner setter for fan-in merging)
-            if tgt_port_x > src_port_x:
-                self._set_corner(canvas, tgt_port_x, mid_y, "top_right")
-            else:
-                self._set_corner(canvas, tgt_port_x, mid_y, "top_left")
+            # Skip if target is at same x as source (already handled above)
+            if tgt_port_x != src_port_x:
+                if tgt_port_x > src_port_x:
+                    self._set_corner(canvas, tgt_port_x, mid_y, "top_right")
+                else:
+                    self._set_corner(canvas, tgt_port_x, mid_y, "top_left")
 
             # Vertical from mid to target (stop before arrow position)
             # Only draw if there's actually space between the corner and the arrow
@@ -1529,8 +1554,37 @@ class FlowchartGenerator:
             LINE_CHARS["tee_up"],
             LINE_CHARS["tee_down"],
         ):
-            # Tee + corner = cross (tee already has 3 segments, adding any new = 4)
-            canvas.set(x, y, LINE_CHARS["cross"])
+            # Tee + corner: only becomes cross if corner adds a genuinely new segment
+            # tee_left (├): up, down, right
+            # tee_right (┤): up, down, left
+            # tee_up (┴): up, left, right
+            # tee_down (┬): down, left, right
+            tee_segments = set()
+            if current == LINE_CHARS["tee_left"]:
+                tee_segments = {"up", "down", "right"}
+            elif current == LINE_CHARS["tee_right"]:
+                tee_segments = {"up", "down", "left"}
+            elif current == LINE_CHARS["tee_up"]:
+                tee_segments = {"up", "left", "right"}
+            elif current == LINE_CHARS["tee_down"]:
+                tee_segments = {"down", "left", "right"}
+
+            # Add segments from new corner
+            corner_segments = set()
+            if corner_type == "top_left":
+                corner_segments = {"down", "right"}
+            elif corner_type == "top_right":
+                corner_segments = {"down", "left"}
+            elif corner_type == "bottom_left":
+                corner_segments = {"up", "right"}
+            elif corner_type == "bottom_right":
+                corner_segments = {"up", "left"}
+
+            # Check if corner adds any new segment
+            combined = tee_segments | corner_segments
+            if combined == {"up", "down", "left", "right"}:
+                canvas.set(x, y, LINE_CHARS["cross"])
+            # else: tee already has all needed segments, no change
         # else: leave existing character (arrows, box chars, etc.)
 
     def _draw_back_edges(
@@ -1857,7 +1911,29 @@ class FlowchartGenerator:
                 if boxes_in_path:
                     break
 
-        if has_overlap and not boxes_in_path:
+        # Check if other targets from this source require fan-out routing
+        # If so, we should use fan-out routing for ALL edges to avoid crossing
+        other_targets_need_fanout = False
+        if len(source_targets) > 1:
+            for t in source_targets:
+                if t == target:
+                    continue
+                t_dims = box_dimensions[t]
+                t_x, t_y = box_positions[t]
+                t_top = t_y + 1
+                t_bottom = t_y + t_dims.height - 2
+                # Adjust for compact boxes with single content row
+                if t_bottom < t_top:
+                    t_bottom = t_top
+                t_overlap_top = max(src_top, t_top)
+                t_overlap_bottom = min(src_bottom, t_bottom)
+                # Use > for NO overlap (opposite of <= check)
+                if t_overlap_top > t_overlap_bottom:
+                    # This target has no vertical overlap, will use fan-out routing
+                    other_targets_need_fanout = True
+                    break
+
+        if has_overlap and not boxes_in_path and not other_targets_need_fanout:
             # Boxes overlap vertically and no obstructions
             overlapping_targets = []
             for t in source_targets:
@@ -1971,8 +2047,9 @@ class FlowchartGenerator:
             # Arrow
             canvas.set(tgt_port_x - 1, tgt_port_y, ARROW_CHARS["right"])
 
-        elif src_port_y == tgt_port_y:
+        elif src_port_y == tgt_port_y and not other_targets_need_fanout:
             # Direct horizontal line
+            # Only use direct horizontal when there's no fan-out from this source
             # Note: _draw_horizontal_line is exclusive of endpoints, so we adjust
             # start_x - 1 so the line begins at start_x, and end_x - 1 so it ends
             # at end_x - 2 (one position before the arrow at end_x - 1)
@@ -1990,7 +2067,16 @@ class FlowchartGenerator:
             self._draw_horizontal_line(canvas, start_x - 1, mid_x, src_port_y)
 
             # Corner at source row (use smart corner setter for proper junctions)
-            if tgt_port_y > src_port_y:
+            if src_port_y == tgt_port_y:
+                # Target is directly to the right of source - draw horizontal at mid_x
+                # to connect the two horizontal segments. Other edges going up/down
+                # will convert this to appropriate tees via _set_corner.
+                current = canvas.get(mid_x, src_port_y)
+                if current in (" ", BOX_CHARS["shadow"]):
+                    canvas.set(mid_x, src_port_y, LINE_CHARS["horizontal"])
+                # If there's already something there, _set_corner from other edges
+                # will have handled it correctly
+            elif tgt_port_y > src_port_y:
                 self._set_corner(canvas, mid_x, src_port_y, "top_right")
             else:
                 self._set_corner(canvas, mid_x, src_port_y, "bottom_right")
@@ -2000,15 +2086,18 @@ class FlowchartGenerator:
             if tgt_port_y > src_port_y:
                 if src_port_y + 1 <= tgt_port_y - 1:
                     self._draw_vertical_line(canvas, mid_x, src_port_y + 1, tgt_port_y - 1)
-            else:
+            elif tgt_port_y < src_port_y:
                 if tgt_port_y + 1 <= src_port_y - 1:
                     self._draw_vertical_line(canvas, mid_x, tgt_port_y + 1, src_port_y - 1)
+            # If src_port_y == tgt_port_y, no vertical segment needed
 
             # Corner at target row (use smart corner setter for proper junctions)
-            if tgt_port_y > src_port_y:
-                self._set_corner(canvas, mid_x, tgt_port_y, "bottom_left")
-            else:
-                self._set_corner(canvas, mid_x, tgt_port_y, "top_left")
+            # Skip if target is at same y as source (already handled above)
+            if tgt_port_y != src_port_y:
+                if tgt_port_y > src_port_y:
+                    self._set_corner(canvas, mid_x, tgt_port_y, "bottom_left")
+                else:
+                    self._set_corner(canvas, mid_x, tgt_port_y, "top_left")
 
             # Horizontal from mid to target
             # Adjust for exclusive endpoints: mid_x so line begins at mid_x + 1,
