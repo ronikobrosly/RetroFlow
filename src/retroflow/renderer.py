@@ -86,8 +86,17 @@ class Canvas:
             [fill_char for _ in range(width)] for _ in range(height)
         ]
 
-    def set(self, x: int, y: int, char: str) -> None:
-        """Set a character at position (x, y)."""
+    def set(self, x: int, y: int, char: str, reason: str = "") -> None:
+        """
+        Set a character at position (x, y).
+
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            char: Character to place
+            reason: Optional reason for placement (used by TracedCanvas for debugging,
+                    ignored by regular Canvas)
+        """
         if 0 <= x < self.width and 0 <= y < self.height:
             self.grid[y][x] = char
 

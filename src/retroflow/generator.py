@@ -13,6 +13,7 @@ The generator supports:
 - Group boxes for organizing related nodes
 - Cycle detection with back-edge routing
 - PNG and text file export
+- Debug mode for tracing rendering decisions
 
 Example:
     >>> from retroflow import FlowchartGenerator
@@ -22,10 +23,17 @@ Example:
     ...     B -> C
     ... ''')
     >>> print(flowchart)
+
+Debug Mode Example:
+    >>> generator = FlowchartGenerator()
+    >>> flowchart = generator.generate("A -> B", debug=True)
+    >>> trace = generator.get_trace()
+    >>> print(trace.summary())
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
+from .debug import TracedCanvas
 from .edge_drawing import EdgeDrawer
 from .export import FlowchartExporter
 from .layout import LayoutResult, NetworkXLayout
@@ -39,6 +47,7 @@ from .renderer import (
     GroupBoxRenderer,
     TitleRenderer,
 )
+from .tracer import RenderTrace
 
 
 class FlowchartGenerator:
@@ -135,17 +144,62 @@ class FlowchartGenerator:
         )
         self.exporter = FlowchartExporter(default_font=font)
 
-    def generate(self, input_text: str, title: Optional[str] = None) -> str:
+        # Debug trace storage (populated when debug=True in generate())
+        self._last_trace: Optional[RenderTrace] = None
+
+    def get_trace(self) -> Optional[RenderTrace]:
+        """
+        Get the trace from the last generate() call with debug=True.
+
+        Returns:
+            The RenderTrace from the last debug run, or None if debug
+            mode was not used or generate() hasn't been called.
+
+        Example:
+            >>> generator = FlowchartGenerator()
+            >>> result = generator.generate("A -> B", debug=True)
+            >>> trace = generator.get_trace()
+            >>> print(trace.summary())
+        """
+        return self._last_trace
+
+    def generate(
+        self, input_text: str, title: Optional[str] = None, debug: bool = False
+    ) -> str:
         """
         Generate an ASCII flowchart from input text.
 
         Args:
             input_text: Multi-line string with connections like "A -> B".
             title: Optional title to display (overrides instance title).
+            debug: If True, capture detailed trace information about the
+                   rendering process. Access via get_trace() after calling.
 
         Returns:
             ASCII art flowchart as a string.
+
+        Debug Mode:
+            When debug=True, a detailed trace is captured that includes:
+            - Pipeline stages (parse, layout, positions, etc.)
+            - Canvas snapshots at each stage
+            - Every character placement with coordinates and reasons
+
+            Access the trace via get_trace() after calling generate():
+
+            >>> generator = FlowchartGenerator()
+            >>> result = generator.generate("A -> B", debug=True)
+            >>> trace = generator.get_trace()
+            >>> print(trace.summary())
+            >>> trace.dump_to_file("debug_trace.txt")
         """
+        # Initialize debug trace if requested
+        trace: Optional[RenderTrace] = None
+        if debug:
+            trace = RenderTrace(input_text=input_text, direction=self.direction)
+            self._last_trace = trace
+        else:
+            self._last_trace = None
+
         # Use provided title or fall back to instance title
         effective_title = title if title is not None else self.title
 
@@ -153,13 +207,37 @@ class FlowchartGenerator:
         connections = self.parser.parse(input_text)
         groups = self.parser.groups
 
+        if trace:
+            trace.add_stage("parse", {
+                "connections": connections,
+                "groups": [(g.name, g.members) for g in groups],
+            })
+
         # Run layout
         layout_result = self.layout_engine.layout(connections, groups)
+
+        if trace:
+            trace.add_stage("layout", {
+                "layers": layout_result.layers,
+                "back_edges": list(layout_result.back_edges),
+                "node_positions": {
+                    name: (node.layer, node.position)
+                    for name, node in layout_result.nodes.items()
+                },
+            })
 
         # Calculate box dimensions for each node
         box_dimensions = self.position_calculator.calculate_all_box_dimensions(
             layout_result
         )
+
+        if trace:
+            trace.add_stage("dimensions", {
+                "box_dimensions": {
+                    name: (dims.width, dims.height)
+                    for name, dims in box_dimensions.items()
+                },
+            })
 
         # Calculate actual pixel positions - leave margin for back edges
         # Each back edge needs 3 chars of space, plus 4 for min line before arrow
@@ -186,6 +264,16 @@ class FlowchartGenerator:
             column_boundaries = self.position_calculator.calculate_column_boundaries(
                 layout_result, box_dimensions
             )
+
+        if trace:
+            trace.add_stage("positions", {
+                "box_positions": dict(box_positions),
+                "back_edge_margin": back_edge_margin,
+                "layer_boundaries": [
+                    (lb.layer_idx, lb.top_y, lb.bottom_y, lb.gap_start_y, lb.gap_end_y)
+                    for lb in layer_boundaries
+                ],
+            })
 
         # Calculate group bounding boxes (may have negative y values due to labels)
         group_boxes = self.position_calculator.calculate_group_bounding_boxes(
@@ -275,10 +363,23 @@ class FlowchartGenerator:
                 title_x_offset = (canvas_width - title_width) // 2
 
         # Create canvas with padding and title space
-        canvas = Canvas(canvas_width + 5, canvas_height + title_height + 5)
+        canvas: Union[Canvas, TracedCanvas] = Canvas(
+            canvas_width + 5, canvas_height + title_height + 5
+        )
+
+        if trace:
+            trace.add_stage("canvas_created", {
+                "canvas_width": canvas_width + 5,
+                "canvas_height": canvas_height + title_height + 5,
+                "title_height": title_height,
+            }, canvas)
+            # Wrap canvas with TracedCanvas for character-level tracing
+            canvas = TracedCanvas(canvas, trace)
 
         # Draw title if present, centered above the diagram
         if effective_title:
+            if isinstance(canvas, TracedCanvas):
+                canvas.set_source("TitleRenderer.draw_title")
             self.title_renderer.draw_title(
                 canvas, title_x_offset, 0, effective_title, title_width
             )
@@ -329,12 +430,26 @@ class FlowchartGenerator:
 
         # Draw group boxes first (before node boxes so nodes appear on top)
         if group_boxes:
+            if isinstance(canvas, TracedCanvas):
+                canvas.set_source("GroupBoxRenderer.draw_group_box")
             self._draw_group_boxes(canvas, group_boxes)
 
         # Draw node boxes
+        if isinstance(canvas, TracedCanvas):
+            canvas.set_source("BoxRenderer.draw_box")
         self._draw_boxes(canvas, box_dimensions, box_positions, layout_result)
 
+        if trace:
+            # Get underlying canvas for snapshot
+            underlying = canvas._canvas if isinstance(canvas, TracedCanvas) else canvas
+            trace.add_stage("boxes_drawn", {
+                "num_boxes": len(box_positions),
+                "num_group_boxes": len(group_boxes) if group_boxes else 0,
+            }, underlying)
+
         # Draw forward edges with layer-aware routing
+        if isinstance(canvas, TracedCanvas):
+            canvas.set_source("EdgeDrawer.draw_edges")
         if self.direction == "LR":
             self.edge_drawer.draw_edges_horizontal(
                 canvas,
@@ -349,8 +464,19 @@ class FlowchartGenerator:
                 canvas, layout_result, box_dimensions, box_positions, layer_boundaries
             )
 
+        if trace:
+            underlying = canvas._canvas if isinstance(canvas, TracedCanvas) else canvas
+            trace.add_stage("forward_edges_drawn", {
+                "num_forward_edges": len([
+                    e for e in layout_result.edges
+                    if e not in layout_result.back_edges
+                ]),
+            }, underlying)
+
         # Draw back edges along the margin
         if layout_result.back_edges:
+            if isinstance(canvas, TracedCanvas):
+                canvas.set_source("EdgeDrawer.draw_back_edges")
             if self.direction == "LR":
                 self.edge_drawer.draw_back_edges_horizontal(
                     canvas, layout_result, box_dimensions, box_positions, title_height
@@ -359,6 +485,15 @@ class FlowchartGenerator:
                 self.edge_drawer.draw_back_edges(
                     canvas, layout_result, box_dimensions, box_positions
                 )
+
+            if trace:
+                if isinstance(canvas, TracedCanvas):
+                    underlying = canvas._canvas
+                else:
+                    underlying = canvas
+                trace.add_stage("back_edges_drawn", {
+                    "num_back_edges": len(layout_result.back_edges),
+                }, underlying)
 
         return canvas.render()
 

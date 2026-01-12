@@ -246,7 +246,7 @@ class EdgeDrawer:
         tgt_port_y = tgt_y  # Top border
 
         # Modify source bottom border to show exit point (tee down)
-        canvas.set(src_port_x, src_port_y, LINE_CHARS["tee_down"])
+        canvas.set(src_port_x, src_port_y, LINE_CHARS["tee_down"], "source_exit_port")
 
         # Calculate path
         # Start below source (through shadow - arrow lines overwrite shadows)
@@ -275,13 +275,17 @@ class EdgeDrawer:
             self._draw_vertical_line(canvas, src_port_x, start_y, mid_y - 1)
 
             # Corner turning right
-            canvas.set(src_port_x, mid_y, LINE_CHARS["corner_bottom_left"])
+            canvas.set(
+                src_port_x, mid_y, LINE_CHARS["corner_bottom_left"], "route_turn_right"
+            )
 
             # Horizontal segment to the route column
             self._draw_horizontal_line(canvas, src_port_x, route_x, mid_y)
 
             # Corner turning down
-            canvas.set(route_x, mid_y, LINE_CHARS["corner_top_right"])
+            canvas.set(
+                route_x, mid_y, LINE_CHARS["corner_top_right"], "route_turn_down"
+            )
 
             # Find the y position for the horizontal segment above the target
             tgt_mid_y = self._get_safe_horizontal_y(
@@ -292,27 +296,31 @@ class EdgeDrawer:
             self._draw_vertical_line(canvas, route_x, mid_y + 1, tgt_mid_y - 1)
 
             # Corner turning left (line comes from above, exits left)
-            canvas.set(route_x, tgt_mid_y, LINE_CHARS["corner_bottom_right"])
+            canvas.set(
+                route_x, tgt_mid_y, LINE_CHARS["corner_bottom_right"], "route_turn_left"
+            )
 
             # Horizontal segment back toward target
             self._draw_horizontal_line(canvas, tgt_port_x, route_x, tgt_mid_y)
 
             # Corner turning down to target (line comes from right, exits down)
-            canvas.set(tgt_port_x, tgt_mid_y, LINE_CHARS["corner_top_left"])
+            canvas.set(
+                tgt_port_x, tgt_mid_y, LINE_CHARS["corner_top_left"], "route_to_target"
+            )
 
             # Vertical to target (only if there's space between corner and arrow)
             if tgt_mid_y + 1 <= end_y - 2:
                 self._draw_vertical_line(canvas, tgt_port_x, tgt_mid_y + 1, end_y - 2)
 
             # Arrow
-            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
+            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"], "arrow_down")
 
         elif src_port_x == tgt_port_x and not other_targets_need_fanout:
             # Direct vertical line (stop before arrow position)
             # Only use direct vertical when there's no fan-out from this source
             self._draw_vertical_line(canvas, src_port_x, start_y, end_y - 2)
             # Draw arrow one row above target box (doesn't overwrite border)
-            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
+            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"], "arrow_down")
         else:
             # Need to route with horizontal segment
             # Use layer-aware routing: place horizontal segment in the gap zone
@@ -326,7 +334,7 @@ class EdgeDrawer:
             if src_port_x == tgt_port_x:
                 # Target is directly below source - use tee_down for fan-out junction
                 # This avoids creating a cross when source and target corners combine
-                canvas.set(src_port_x, mid_y, LINE_CHARS["tee_down"])
+                canvas.set(src_port_x, mid_y, LINE_CHARS["tee_down"], "fanout_junction")
             elif tgt_port_x > src_port_x:
                 self._set_corner(canvas, src_port_x, mid_y, "bottom_left")
             else:
@@ -349,7 +357,7 @@ class EdgeDrawer:
                 self._draw_vertical_line(canvas, tgt_port_x, mid_y + 1, end_y - 2)
 
             # Draw arrow one row above target box (doesn't overwrite border)
-            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"])
+            canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"], "arrow_down")
 
     def _get_safe_horizontal_y(
         self,
@@ -432,7 +440,7 @@ class EdgeDrawer:
         for y in range(y_start, y_end + 1):
             current = canvas.get(x, y)
             if current == LINE_CHARS["horizontal"]:
-                canvas.set(x, y, LINE_CHARS["cross"])
+                canvas.set(x, y, LINE_CHARS["cross"], "vertical_crosses_horizontal")
             elif current in (
                 LINE_CHARS["corner_top_left"],
                 LINE_CHARS["corner_bottom_left"],
@@ -440,7 +448,7 @@ class EdgeDrawer:
                 # Corners with "right" segment + vertical = tee_right
                 # corner_top_left (┌) has: down, right -> + up, down = tee_right (├)
                 # corner_bottom_left (└) has: up, right -> + up, down = tee_right (├)
-                canvas.set(x, y, LINE_CHARS["tee_right"])
+                canvas.set(x, y, LINE_CHARS["tee_right"], "upgrade_corner_to_tee")
             elif current in (
                 LINE_CHARS["corner_top_right"],
                 LINE_CHARS["corner_bottom_right"],
@@ -448,12 +456,12 @@ class EdgeDrawer:
                 # Corners with "left" segment + vertical = tee_left
                 # corner_top_right (┐) has: down, left -> + up, down = tee_left (┤)
                 # corner_bottom_right (┘) has: up, left -> + up, down = tee_left (┤)
-                canvas.set(x, y, LINE_CHARS["tee_left"])
+                canvas.set(x, y, LINE_CHARS["tee_left"], "upgrade_corner_to_tee")
             elif current in (LINE_CHARS["tee_up"], LINE_CHARS["tee_down"]):
                 # Tees with horizontal segments + vertical = cross
-                canvas.set(x, y, LINE_CHARS["cross"])
+                canvas.set(x, y, LINE_CHARS["cross"], "upgrade_tee_to_cross")
             elif current == " " or current == BOX_CHARS["shadow"]:
-                canvas.set(x, y, LINE_CHARS["vertical"])
+                canvas.set(x, y, LINE_CHARS["vertical"], "vertical_line")
 
     def _draw_horizontal_line(
         self, canvas: Canvas, x_start: int, x_end: int, y: int
@@ -476,7 +484,7 @@ class EdgeDrawer:
         for x in range(x_start + 1, x_end):
             current = canvas.get(x, y)
             if current == LINE_CHARS["vertical"]:
-                canvas.set(x, y, LINE_CHARS["cross"])
+                canvas.set(x, y, LINE_CHARS["cross"], "horizontal_crosses_vertical")
             elif current in (
                 LINE_CHARS["corner_top_left"],
                 LINE_CHARS["corner_top_right"],
@@ -484,7 +492,7 @@ class EdgeDrawer:
                 # Corners with "down" segment + horizontal = tee_down
                 # corner_top_left (┌) has: down, right -> + left, right = tee_down (┬)
                 # corner_top_right (┐) has: down, left -> + left, right = tee_down (┬)
-                canvas.set(x, y, LINE_CHARS["tee_down"])
+                canvas.set(x, y, LINE_CHARS["tee_down"], "upgrade_corner_to_tee")
             elif current in (
                 LINE_CHARS["corner_bottom_left"],
                 LINE_CHARS["corner_bottom_right"],
@@ -492,10 +500,10 @@ class EdgeDrawer:
                 # Corners with "up" segment + horizontal = tee_up
                 # corner_bottom_left (└) has: up, right -> + left, right = tee_up (┴)
                 # corner_bottom_right (┘) has: up, left -> + left, right = tee_up (┴)
-                canvas.set(x, y, LINE_CHARS["tee_up"])
+                canvas.set(x, y, LINE_CHARS["tee_up"], "upgrade_corner_to_tee")
             elif current in (LINE_CHARS["tee_right"], LINE_CHARS["tee_left"]):
                 # Tees with vertical segments + horizontal = cross
-                canvas.set(x, y, LINE_CHARS["cross"])
+                canvas.set(x, y, LINE_CHARS["cross"], "upgrade_vertical_tee_to_cross")
             elif current in (LINE_CHARS["tee_up"], LINE_CHARS["tee_down"]):
                 # These tees already have horizontal connectivity, no change needed
                 pass
@@ -503,7 +511,7 @@ class EdgeDrawer:
                 # Already horizontal, no change needed
                 pass
             elif current == " " or current == BOX_CHARS["shadow"]:
-                canvas.set(x, y, LINE_CHARS["horizontal"])
+                canvas.set(x, y, LINE_CHARS["horizontal"], "horizontal_line")
 
     def _set_corner(self, canvas: Canvas, x: int, y: int, corner_type: str) -> None:
         """
@@ -522,19 +530,19 @@ class EdgeDrawer:
         corner_char = LINE_CHARS[f"corner_{corner_type}"]
 
         if current in (" ", BOX_CHARS["shadow"]):
-            canvas.set(x, y, corner_char)
+            canvas.set(x, y, corner_char, f"corner_{corner_type}")
         elif current == LINE_CHARS["horizontal"]:
             # Horizontal line + corner = tee pointing up or down
             if "top" in corner_type:
-                canvas.set(x, y, LINE_CHARS["tee_down"])
+                canvas.set(x, y, LINE_CHARS["tee_down"], "upgrade_horiz_to_tee")
             else:
-                canvas.set(x, y, LINE_CHARS["tee_up"])
+                canvas.set(x, y, LINE_CHARS["tee_up"], "upgrade_horiz_to_tee")
         elif current == LINE_CHARS["vertical"]:
             # Vertical line + corner = tee pointing left or right
             if "left" in corner_type:
-                canvas.set(x, y, LINE_CHARS["tee_right"])
+                canvas.set(x, y, LINE_CHARS["tee_right"], "upgrade_vert_to_tee")
             else:
-                canvas.set(x, y, LINE_CHARS["tee_left"])
+                canvas.set(x, y, LINE_CHARS["tee_left"], "upgrade_vert_to_tee")
         elif current in (
             LINE_CHARS["corner_top_left"],
             LINE_CHARS["corner_top_right"],
@@ -569,18 +577,18 @@ class EdgeDrawer:
 
             # Determine result based on combined segments
             if segments == {"up", "down", "left", "right"}:
-                canvas.set(x, y, LINE_CHARS["cross"])
+                canvas.set(x, y, LINE_CHARS["cross"], "merge_corners_to_cross")
             elif segments == {"up", "down", "right"}:
-                canvas.set(x, y, LINE_CHARS["tee_right"])
+                canvas.set(x, y, LINE_CHARS["tee_right"], "merge_corners_to_tee_right")
             elif segments == {"up", "down", "left"}:
-                canvas.set(x, y, LINE_CHARS["tee_left"])
+                canvas.set(x, y, LINE_CHARS["tee_left"], "merge_corners_to_tee_left")
             elif segments == {"up", "left", "right"}:
-                canvas.set(x, y, LINE_CHARS["tee_up"])
+                canvas.set(x, y, LINE_CHARS["tee_up"], "merge_corners_to_tee_up")
             elif segments == {"down", "left", "right"}:
-                canvas.set(x, y, LINE_CHARS["tee_down"])
+                canvas.set(x, y, LINE_CHARS["tee_down"], "merge_corners_to_tee_down")
             else:
                 # Same corner or incomplete, keep the corner
-                canvas.set(x, y, corner_char)
+                canvas.set(x, y, corner_char, f"corner_{corner_type}_unchanged")
         elif current in (
             LINE_CHARS["tee_left"],
             LINE_CHARS["tee_right"],
@@ -616,7 +624,7 @@ class EdgeDrawer:
             # Check if corner adds any new segment
             combined = tee_segments | corner_segments
             if combined == {"up", "down", "left", "right"}:
-                canvas.set(x, y, LINE_CHARS["cross"])
+                canvas.set(x, y, LINE_CHARS["cross"], "upgrade_tee_corner_to_cross")
             # else: tee already has all needed segments, no change
 
     def draw_back_edges(

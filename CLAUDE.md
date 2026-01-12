@@ -108,6 +108,8 @@ retroflow/
 │   ├── positioning.py       # Position calculation for nodes and groups
 │   ├── edge_drawing.py      # Edge rendering for TB and LR modes
 │   ├── export.py            # PNG and text file export functionality
+│   ├── tracer.py            # Debug tracing infrastructure (RenderTrace, etc.)
+│   ├── debug.py             # Debug utilities (TracedCanvas, visual_diff, etc.)
 │   └── py.typed             # PEP 561 type marker
 ├── tests/
 │   ├── conftest.py          # Shared pytest fixtures
@@ -131,3 +133,181 @@ retroflow/
 | `positioning.py` | `PositionCalculator` class for calculating node positions, layer/column boundaries, and port positions |
 | `edge_drawing.py` | `EdgeDrawer` class for rendering forward and back edges in TB and LR modes |
 | `export.py` | `FlowchartExporter` class for PNG and text file export with font handling |
+| `tracer.py` | Debug tracing infrastructure - `RenderTrace`, `PipelineStage`, `CharacterPlacement` for capturing rendering decisions |
+| `debug.py` | Debug utilities - `TracedCanvas` wrapper, `visual_diff`, `CanvasInspector` for debugging and analysis |
+
+
+## Debug Tracing System
+
+The codebase includes a comprehensive debug tracing system designed to make it easier for Claude Code (and developers) to understand and debug the rendering pipeline. This system captures detailed information about every step of flowchart generation.
+
+### Why This Exists
+
+The flowchart rendering process involves:
+- Multiple pipeline stages (parse → layout → positions → edges)
+- Complex character merging logic (lines intersecting become tees, crosses, etc.)
+- Coordinate transformations at each stage
+- Multiple methods that can place/overwrite the same canvas position
+
+Without visibility into these intermediate states, debugging rendering issues is extremely difficult. The debug tracing system solves this by capturing:
+1. **Pipeline stages** with snapshots of data at each step
+2. **Every character placement** with coordinates, previous character, and reason
+
+### How to Use Debug Mode
+
+```python
+from retroflow import FlowchartGenerator
+
+# Enable debug mode
+generator = FlowchartGenerator()
+result = generator.generate("A -> B\nB -> C", debug=True)
+
+# Get the trace
+trace = generator.get_trace()
+
+# Print summary
+print(trace.summary())
+
+# Dump full trace to file for analysis
+trace.dump_to_file("debug_trace.txt")
+
+# Show canvas evolution through stages
+print(trace.dump_canvas_evolution())
+```
+
+### RenderTrace API
+
+The `RenderTrace` object provides these key methods:
+
+```python
+# Get summary statistics
+trace.summary()
+
+# Get full dump
+trace.dump()
+
+# Get canvas at specific stage
+canvas_lines = trace.get_canvas_at_stage("boxes_drawn")
+
+# Get all placements at a coordinate (useful for debugging overwrites)
+placements = trace.get_placements_at(x=10, y=5)
+
+# Find all character upgrades (where existing char was modified)
+upgrades = trace.get_character_upgrades()
+
+# Filter placements by source method
+edge_placements = trace.get_placements_by_source("EdgeDrawer")
+
+# Filter placements by reason
+corners = trace.get_placements_by_reason("corner")
+```
+
+### Pipeline Stages
+
+The trace captures these stages:
+
+| Stage | Description |
+|-------|-------------|
+| `parse` | Connections and groups extracted from input text |
+| `layout` | Layer assignments, node positions, back edges identified |
+| `dimensions` | Box dimensions (width, height) calculated for each node |
+| `positions` | Canvas coordinates calculated for each box |
+| `canvas_created` | Initial empty canvas created |
+| `boxes_drawn` | All node and group boxes rendered |
+| `forward_edges_drawn` | Forward edges rendered (normal flow) |
+| `back_edges_drawn` | Back edges rendered (cycles) |
+
+### Character Placement Reasons
+
+Each character placement includes a reason string. Common reasons:
+
+| Reason | Meaning |
+|--------|---------|
+| `vertical_line` | Drawing vertical edge segment |
+| `horizontal_line` | Drawing horizontal edge segment |
+| `corner_top_left` | Placing ┌ corner |
+| `corner_bottom_right` | Placing ┘ corner |
+| `upgrade_left_corner_to_tee_right` | ┌ or └ + vertical = ├ |
+| `upgrade_horizontal_to_tee_down` | ─ + corner = ┬ |
+| `vertical_crosses_horizontal` | Creating ┼ intersection |
+| `merge_corners_to_tee_*` | Two corners combining |
+| `arrow_down` | Placing ▼ arrow |
+| `source_exit_port` | Marking box exit point with ┬ |
+| `fanout_junction` | Fan-out junction point |
+
+### TracedCanvas
+
+The `TracedCanvas` wraps a regular `Canvas` and intercepts all character placements:
+
+```python
+from retroflow.renderer import Canvas
+from retroflow.tracer import RenderTrace
+from retroflow.debug import TracedCanvas
+
+canvas = Canvas(80, 40)
+trace = RenderTrace()
+traced = TracedCanvas(canvas, trace)
+
+# Set the current source context
+traced.set_source("MyModule.my_method")
+
+# All set() calls are now recorded
+traced.set(10, 5, "│", reason="my_vertical_line")
+
+# Check what was recorded
+print(trace.character_placements[-1])
+```
+
+### visual_diff Utility
+
+For comparing expected vs actual output:
+
+```python
+from retroflow.debug import visual_diff
+
+expected = "┌───┐\n│ A │\n└───┘"
+actual = "┌───┐\n│ B │\n└───┘"
+
+print(visual_diff(expected, actual))
+# Shows exactly where characters differ
+```
+
+### CanvasInspector Utility
+
+For analyzing canvas contents:
+
+```python
+from retroflow.debug import CanvasInspector
+
+inspector = CanvasInspector(canvas)
+
+# Find all positions of a character
+corners = inspector.find_char("┌")
+
+# Count line-drawing characters
+counts = inspector.get_line_chars_count()
+
+# Extract a region
+region = inspector.get_region(x=5, y=3, width=10, height=5)
+```
+
+### Best Practices for Debugging
+
+1. **Start with trace.summary()** - Get an overview of what happened
+2. **Use get_placements_at()** - When a specific position looks wrong, see all placements there
+3. **Use get_character_upgrades()** - To find all merge/upgrade operations
+4. **Use dump_canvas_evolution()** - To see how the canvas built up stage by stage
+5. **Filter by source** - To isolate placements from a specific method
+6. **Write targeted tests** - Use traces to verify specific rendering decisions
+
+### Adding Reasons to New Code
+
+When adding new rendering code, include reason parameters:
+
+```python
+# Good - with reason
+canvas.set(x, y, LINE_CHARS["vertical"], "my_new_vertical_segment")
+
+# Also acceptable - TracedCanvas will infer a basic reason
+canvas.set(x, y, LINE_CHARS["vertical"])
+```
