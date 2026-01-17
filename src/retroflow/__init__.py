@@ -34,7 +34,7 @@ from .renderer import (
 from .router import BoxInfo, EdgeRoute, EdgeRouter
 from .tracer import CharacterPlacement, PipelineStage, RenderTrace
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 __all__ = [
     # Main API

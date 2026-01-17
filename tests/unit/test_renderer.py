@@ -544,5 +544,3 @@ class TestTitleRenderer:
         # Text starts at x = 1 (border) + 2 (offset) = 3
         assert canvas.get(3, 1) == "H"
         assert canvas.get(4, 1) == "i"
-
-

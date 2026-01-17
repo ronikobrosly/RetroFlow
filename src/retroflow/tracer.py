@@ -57,8 +57,7 @@ class CharacterPlacement:
     def __str__(self) -> str:
         if self.previous_char == " ":
             return (
-                f"({self.x},{self.y}): '{self.char}' "
-                f"[{self.reason}] from {self.source}"
+                f"({self.x},{self.y}): '{self.char}' [{self.reason}] from {self.source}"
             )
         return (
             f"({self.x},{self.y}): '{self.previous_char}' -> '{self.char}' "
@@ -230,17 +229,13 @@ class RenderTrace:
         self, source_substring: str
     ) -> List[CharacterPlacement]:
         """Get all placements from a specific source (partial match)."""
-        return [
-            p for p in self.character_placements if source_substring in p.source
-        ]
+        return [p for p in self.character_placements if source_substring in p.source]
 
     def get_placements_by_reason(
         self, reason_substring: str
     ) -> List[CharacterPlacement]:
         """Get all placements with a specific reason (partial match)."""
-        return [
-            p for p in self.character_placements if reason_substring in p.reason
-        ]
+        return [p for p in self.character_placements if reason_substring in p.reason]
 
     def summary(self) -> str:
         """

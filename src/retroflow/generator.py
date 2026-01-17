@@ -196,22 +196,28 @@ class FlowchartGenerator:
         connections = self.parser.parse(input_text)
 
         if trace:
-            trace.add_stage("parse", {
-                "connections": connections,
-            })
+            trace.add_stage(
+                "parse",
+                {
+                    "connections": connections,
+                },
+            )
 
         # Run layout
         layout_result = self.layout_engine.layout(connections)
 
         if trace:
-            trace.add_stage("layout", {
-                "layers": layout_result.layers,
-                "back_edges": list(layout_result.back_edges),
-                "node_positions": {
-                    name: (node.layer, node.position)
-                    for name, node in layout_result.nodes.items()
+            trace.add_stage(
+                "layout",
+                {
+                    "layers": layout_result.layers,
+                    "back_edges": list(layout_result.back_edges),
+                    "node_positions": {
+                        name: (node.layer, node.position)
+                        for name, node in layout_result.nodes.items()
+                    },
                 },
-            })
+            )
 
         # Calculate box dimensions for each node
         box_dimensions = self.position_calculator.calculate_all_box_dimensions(
@@ -219,12 +225,15 @@ class FlowchartGenerator:
         )
 
         if trace:
-            trace.add_stage("dimensions", {
-                "box_dimensions": {
-                    name: (dims.width, dims.height)
-                    for name, dims in box_dimensions.items()
+            trace.add_stage(
+                "dimensions",
+                {
+                    "box_dimensions": {
+                        name: (dims.width, dims.height)
+                        for name, dims in box_dimensions.items()
+                    },
                 },
-            })
+            )
 
         # Calculate actual pixel positions - leave margin for back edges
         # Each back edge needs 3 chars of space, plus 4 for min line before arrow
@@ -253,14 +262,23 @@ class FlowchartGenerator:
             )
 
         if trace:
-            trace.add_stage("positions", {
-                "box_positions": dict(box_positions),
-                "back_edge_margin": back_edge_margin,
-                "layer_boundaries": [
-                    (lb.layer_idx, lb.top_y, lb.bottom_y, lb.gap_start_y, lb.gap_end_y)
-                    for lb in layer_boundaries
-                ],
-            })
+            trace.add_stage(
+                "positions",
+                {
+                    "box_positions": dict(box_positions),
+                    "back_edge_margin": back_edge_margin,
+                    "layer_boundaries": [
+                        (
+                            lb.layer_idx,
+                            lb.top_y,
+                            lb.bottom_y,
+                            lb.gap_start_y,
+                            lb.gap_end_y,
+                        )
+                        for lb in layer_boundaries
+                    ],
+                },
+            )
 
         # Calculate canvas size
         canvas_width, canvas_height = self.position_calculator.calculate_canvas_size(
@@ -294,11 +312,15 @@ class FlowchartGenerator:
         )
 
         if trace:
-            trace.add_stage("canvas_created", {
-                "canvas_width": canvas_width + 5,
-                "canvas_height": canvas_height + title_height + 5,
-                "title_height": title_height,
-            }, canvas)
+            trace.add_stage(
+                "canvas_created",
+                {
+                    "canvas_width": canvas_width + 5,
+                    "canvas_height": canvas_height + title_height + 5,
+                    "title_height": title_height,
+                },
+                canvas,
+            )
             # Wrap canvas with TracedCanvas for character-level tracing
             canvas = TracedCanvas(canvas, trace)
 
@@ -349,9 +371,13 @@ class FlowchartGenerator:
         if trace:
             # Get underlying canvas for snapshot
             underlying = canvas._canvas if isinstance(canvas, TracedCanvas) else canvas
-            trace.add_stage("boxes_drawn", {
-                "num_boxes": len(box_positions),
-            }, underlying)
+            trace.add_stage(
+                "boxes_drawn",
+                {
+                    "num_boxes": len(box_positions),
+                },
+                underlying,
+            )
 
         # Draw forward edges with layer-aware routing
         if isinstance(canvas, TracedCanvas):
@@ -372,12 +398,19 @@ class FlowchartGenerator:
 
         if trace:
             underlying = canvas._canvas if isinstance(canvas, TracedCanvas) else canvas
-            trace.add_stage("forward_edges_drawn", {
-                "num_forward_edges": len([
-                    e for e in layout_result.edges
-                    if e not in layout_result.back_edges
-                ]),
-            }, underlying)
+            trace.add_stage(
+                "forward_edges_drawn",
+                {
+                    "num_forward_edges": len(
+                        [
+                            e
+                            for e in layout_result.edges
+                            if e not in layout_result.back_edges
+                        ]
+                    ),
+                },
+                underlying,
+            )
 
         # Draw back edges along the margin
         if layout_result.back_edges:
@@ -397,9 +430,13 @@ class FlowchartGenerator:
                     underlying = canvas._canvas
                 else:
                     underlying = canvas
-                trace.add_stage("back_edges_drawn", {
-                    "num_back_edges": len(layout_result.back_edges),
-                }, underlying)
+                trace.add_stage(
+                    "back_edges_drawn",
+                    {
+                        "num_back_edges": len(layout_result.back_edges),
+                    },
+                    underlying,
+                )
 
         return canvas.render()
 

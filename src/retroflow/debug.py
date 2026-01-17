@@ -178,8 +178,10 @@ class TracedCanvas:
         # Corners
         if char in "┌┐└┘":
             corner_names = {
-                "┌": "top_left", "┐": "top_right",
-                "└": "bottom_left", "┘": "bottom_right",
+                "┌": "top_left",
+                "┐": "top_right",
+                "└": "bottom_left",
+                "┘": "bottom_right",
             }
             return f"corner_{corner_names.get(char, 'unknown')}"
 

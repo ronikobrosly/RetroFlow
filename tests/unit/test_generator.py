@@ -1009,5 +1009,3 @@ class TestFlowchartGeneratorHorizontalMode:
         assert "End" in result
         for node in ["A", "B", "C", "D"]:
             assert node in result
-
-

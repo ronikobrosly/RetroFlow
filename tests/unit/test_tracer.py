@@ -5,7 +5,6 @@ These tests verify the debug tracing infrastructure used to capture
 detailed information about the flowchart generation pipeline.
 """
 
-
 from retroflow.tracer import CharacterPlacement, PipelineStage, RenderTrace
 
 
@@ -15,8 +14,12 @@ class TestCharacterPlacement:
     def test_creation(self):
         """Test basic creation of CharacterPlacement."""
         placement = CharacterPlacement(
-            x=10, y=5, char="│", previous_char=" ", reason="vertical_line",
-            source="EdgeDrawer._draw_vertical_line"
+            x=10,
+            y=5,
+            char="│",
+            previous_char=" ",
+            reason="vertical_line",
+            source="EdgeDrawer._draw_vertical_line",
         )
         assert placement.x == 10
         assert placement.y == 5
@@ -28,8 +31,12 @@ class TestCharacterPlacement:
     def test_str_new_placement(self):
         """Test string representation for new placement (empty previous)."""
         placement = CharacterPlacement(
-            x=10, y=5, char="│", previous_char=" ", reason="vertical_line",
-            source="EdgeDrawer"
+            x=10,
+            y=5,
+            char="│",
+            previous_char=" ",
+            reason="vertical_line",
+            source="EdgeDrawer",
         )
         result = str(placement)
         assert "(10,5)" in result
@@ -40,8 +47,12 @@ class TestCharacterPlacement:
     def test_str_upgrade_placement(self):
         """Test string representation for upgrade (non-empty previous)."""
         placement = CharacterPlacement(
-            x=10, y=5, char="┼", previous_char="│",
-            reason="vertical_crosses_horizontal", source="EdgeDrawer"
+            x=10,
+            y=5,
+            char="┼",
+            previous_char="│",
+            reason="vertical_crosses_horizontal",
+            source="EdgeDrawer",
         )
         result = str(placement)
         assert "(10,5)" in result
@@ -54,10 +65,7 @@ class TestPipelineStage:
 
     def test_creation_basic(self):
         """Test basic creation without canvas snapshot."""
-        stage = PipelineStage(
-            name="parse",
-            data={"connections": [("A", "B")]}
-        )
+        stage = PipelineStage(name="parse", data={"connections": [("A", "B")]})
         assert stage.name == "parse"
         assert stage.data["connections"] == [("A", "B")]
         assert stage.canvas_snapshot is None
@@ -67,7 +75,7 @@ class TestPipelineStage:
         stage = PipelineStage(
             name="boxes_drawn",
             data={"num_boxes": 3},
-            canvas_snapshot=["┌───┐", "│ A │", "└───┘"]
+            canvas_snapshot=["┌───┐", "│ A │", "└───┘"],
         )
         assert stage.name == "boxes_drawn"
         assert stage.canvas_snapshot is not None
@@ -86,7 +94,7 @@ class TestPipelineStage:
         stage = PipelineStage(
             name="boxes_drawn",
             data={"num_boxes": 2},
-            canvas_snapshot=["line1", "line2"]
+            canvas_snapshot=["line1", "line2"],
         )
         result = str(stage)
         assert "boxes_drawn" in result

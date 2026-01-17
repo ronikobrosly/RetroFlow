@@ -5,7 +5,6 @@ These tests verify the debug utilities including TracedCanvas,
 visual_diff, and CanvasInspector.
 """
 
-
 from retroflow.debug import CanvasInspector, TracedCanvas, visual_diff
 from retroflow.renderer import Canvas
 from retroflow.tracer import RenderTrace
