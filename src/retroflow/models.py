@@ -1,19 +1,16 @@
 """
 Data models for flowchart generation.
 
-This module contains dataclasses that represent layout boundaries and bounding boxes
+This module contains dataclasses that represent layout boundaries
 used throughout the flowchart generation process. These models encapsulate the
 geometric information needed for positioning nodes and routing edges.
 
 Classes:
     LayerBoundary: Boundary information for a horizontal layer (TB mode).
     ColumnBoundary: Boundary information for a vertical column (LR mode).
-    GroupBoundingBox: Bounding box for a group of related nodes.
 """
 
 from dataclasses import dataclass
-
-from .parser import Group
 
 
 @dataclass
@@ -60,28 +57,3 @@ class ColumnBoundary:
     right_x: int
     gap_start_x: int
     gap_end_x: int
-
-
-@dataclass
-class GroupBoundingBox:
-    """
-    Bounding box for a group of related nodes.
-
-    Groups are visually enclosed regions that contain multiple nodes,
-    with a label displayed above the contained nodes.
-
-    Attributes:
-        group: The Group object containing node names and label.
-        x: Left edge X coordinate of the group box.
-        y: Top edge Y coordinate of the group box.
-        width: Total width including border.
-        height: Total height including border.
-        label_height: Height of the label area above the nodes.
-    """
-
-    group: Group
-    x: int
-    y: int
-    width: int
-    height: int
-    label_height: int

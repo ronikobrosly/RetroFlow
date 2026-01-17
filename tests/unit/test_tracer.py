@@ -56,7 +56,7 @@ class TestPipelineStage:
         """Test basic creation without canvas snapshot."""
         stage = PipelineStage(
             name="parse",
-            data={"connections": [("A", "B")], "groups": []}
+            data={"connections": [("A", "B")]}
         )
         assert stage.name == "parse"
         assert stage.data["connections"] == [("A", "B")]

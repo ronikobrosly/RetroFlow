@@ -104,8 +104,8 @@ retroflow/
 │   ├── layout.py            # NetworkX-based layout with barycenter ordering
 │   ├── renderer.py          # ASCII canvas, box drawing, and line rendering
 │   ├── router.py            # Edge routing utilities (ports, waypoints)
-│   ├── models.py            # Data models (LayerBoundary, ColumnBoundary, GroupBoundingBox)
-│   ├── positioning.py       # Position calculation for nodes and groups
+│   ├── models.py            # Data models (LayerBoundary, ColumnBoundary)
+│   ├── positioning.py       # Position calculation for nodes
 │   ├── edge_drawing.py      # Edge rendering for TB and LR modes
 │   ├── export.py            # PNG and text file export functionality
 │   ├── tracer.py            # Debug tracing infrastructure (RenderTrace, etc.)
@@ -129,7 +129,7 @@ retroflow/
 | `layout.py` | `NetworkXLayout` class using networkx for graph representation, cycle detection, topological sorting, and barycenter-based node ordering. `SugiyamaLayout` is an alias for backwards compatibility. |
 | `renderer.py` | `Canvas` for 2D character grid, `BoxRenderer` for Unicode box drawing with shadows, `LineRenderer` for edge drawing utilities |
 | `router.py` | `EdgeRouter` for port allocation and orthogonal edge routing (utility module for future use) |
-| `models.py` | Data models for layout boundaries and group bounding boxes used throughout the generation process |
+| `models.py` | Data models for layout boundaries used throughout the generation process |
 | `positioning.py` | `PositionCalculator` class for calculating node positions, layer/column boundaries, and port positions |
 | `edge_drawing.py` | `EdgeDrawer` class for rendering forward and back edges in TB and LR modes |
 | `export.py` | `FlowchartExporter` class for PNG and text file export with font handling |
@@ -208,12 +208,12 @@ The trace captures these stages:
 
 | Stage | Description |
 |-------|-------------|
-| `parse` | Connections and groups extracted from input text |
+| `parse` | Connections extracted from input text |
 | `layout` | Layer assignments, node positions, back edges identified |
 | `dimensions` | Box dimensions (width, height) calculated for each node |
 | `positions` | Canvas coordinates calculated for each box |
 | `canvas_created` | Initial empty canvas created |
-| `boxes_drawn` | All node and group boxes rendered |
+| `boxes_drawn` | All node boxes rendered |
 | `forward_edges_drawn` | Forward edges rendered (normal flow) |
 | `back_edges_drawn` | Back edges rendered (cycles) |
 

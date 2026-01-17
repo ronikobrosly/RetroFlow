@@ -6,7 +6,6 @@ including:
 - Box dimension calculations
 - Node position calculations for both TB (top-to-bottom) and LR (left-to-right) modes
 - Layer and column boundary calculations for edge routing
-- Group bounding box calculations
 - Port position calculations for edge connections
 
 The PositionCalculator class centralizes these calculations and is used by the
@@ -16,60 +15,48 @@ FlowchartGenerator to determine where each element should be placed.
 from typing import Dict, List, Tuple
 
 from .layout import LayoutResult
-from .models import ColumnBoundary, GroupBoundingBox, LayerBoundary
-from .renderer import BoxDimensions, BoxRenderer, GroupBoxRenderer
+from .models import ColumnBoundary, LayerBoundary
+from .renderer import BoxDimensions, BoxRenderer
 
 
 class PositionCalculator:
     """
     Calculates positions for all flowchart elements.
 
-    This class handles the geometric layout of nodes, groups, and boundaries
+    This class handles the geometric layout of nodes and boundaries
     for both vertical (TB) and horizontal (LR) flow directions.
 
     Attributes:
         box_renderer: Renderer for calculating box dimensions.
-        group_box_renderer: Renderer for group boxes.
         min_box_width: Minimum width for node boxes.
         horizontal_spacing: Space between boxes horizontally.
         vertical_spacing: Space between boxes vertically.
         shadow: Whether boxes have shadows.
-        group_padding: Padding around grouped nodes inside group box.
-        group_box_spacing: Minimum spacing between group boxes.
     """
 
     def __init__(
         self,
         box_renderer: BoxRenderer,
-        group_box_renderer: GroupBoxRenderer,
         min_box_width: int = 10,
         horizontal_spacing: int = 12,
         vertical_spacing: int = 3,
         shadow: bool = True,
-        group_padding: int = 2,
-        group_box_spacing: int = 2,
     ):
         """
         Initialize the position calculator.
 
         Args:
             box_renderer: Renderer for calculating box dimensions.
-            group_box_renderer: Renderer for group boxes.
             min_box_width: Minimum width for node boxes.
             horizontal_spacing: Space between boxes horizontally.
             vertical_spacing: Space between boxes vertically.
             shadow: Whether boxes have shadows.
-            group_padding: Padding around grouped nodes inside group box.
-            group_box_spacing: Minimum spacing between group boxes.
         """
         self.box_renderer = box_renderer
-        self.group_box_renderer = group_box_renderer
         self.min_box_width = min_box_width
         self.horizontal_spacing = horizontal_spacing
         self.vertical_spacing = vertical_spacing
         self.shadow = shadow
-        self.group_padding = group_padding
-        self.group_box_spacing = group_box_spacing
 
     def calculate_all_box_dimensions(
         self, layout_result: LayoutResult
@@ -397,207 +384,6 @@ class PositionCalculator:
             max_y = max(max_y, bottom)
 
         return max_x, max_y
-
-    def calculate_group_bounding_boxes(
-        self,
-        layout_result: LayoutResult,
-        box_dimensions: Dict[str, BoxDimensions],
-        box_positions: Dict[str, Tuple[int, int]],
-    ) -> List[GroupBoundingBox]:
-        """
-        Calculate bounding boxes for all groups.
-
-        For each group, finds the minimum bounding box that contains all
-        member nodes with padding for the group border and label.
-
-        Args:
-            layout_result: The layout result containing groups.
-            box_dimensions: Dictionary of box dimensions.
-            box_positions: Dictionary of box positions.
-
-        Returns:
-            List of GroupBoundingBox objects.
-        """
-        group_boxes: List[GroupBoundingBox] = []
-
-        for group in layout_result.groups:
-            # Find bounds of all nodes in this group
-            min_x = float("inf")
-            min_y = float("inf")
-            max_x = float("-inf")
-            max_y = float("-inf")
-
-            valid_nodes = []
-            for node_name in group.nodes:
-                if node_name in box_positions and node_name in box_dimensions:
-                    valid_nodes.append(node_name)
-                    x, y = box_positions[node_name]
-                    dims = box_dimensions[node_name]
-
-                    # Include shadow in calculations
-                    node_right = x + dims.width + (1 if self.shadow else 0)
-                    node_bottom = y + dims.height + (2 if self.shadow else 0)
-
-                    min_x = min(min_x, x)
-                    min_y = min(min_y, y)
-                    max_x = max(max_x, node_right)
-                    max_y = max(max_y, node_bottom)
-
-            if not valid_nodes:
-                continue
-
-            # Calculate label height (wrapped text)
-            label_lines = self.group_box_renderer._wrap_label_text(group.name)
-            label_height = len(label_lines) + 1  # +1 for spacing below label
-
-            # Add padding around the group
-            group_x = int(min_x) - self.group_padding
-            group_y = int(min_y) - self.group_padding - label_height
-            group_width = int(max_x - min_x) + 2 * self.group_padding + 1
-            group_height = (
-                int(max_y - min_y) + 2 * self.group_padding + label_height + 1
-            )
-
-            group_boxes.append(
-                GroupBoundingBox(
-                    group=group,
-                    x=group_x,
-                    y=group_y,
-                    width=group_width,
-                    height=group_height,
-                    label_height=label_height,
-                )
-            )
-
-        return group_boxes
-
-    def separate_group_boxes(
-        self,
-        group_boxes: List[GroupBoundingBox],
-    ) -> List[GroupBoundingBox]:
-        """
-        Adjust group boxes to ensure they don't touch or overlap.
-
-        This method adds spacing between group boxes that would otherwise
-        touch or overlap. It modifies the padding/position to ensure
-        at least `group_box_spacing` characters between adjacent groups.
-
-        Args:
-            group_boxes: List of GroupBoundingBox objects.
-
-        Returns:
-            Adjusted list of GroupBoundingBox objects with proper spacing.
-        """
-        if len(group_boxes) <= 1:
-            return group_boxes
-
-        # Check each pair of group boxes and calculate needed adjustments
-        adjusted_boxes = []
-
-        for i, box in enumerate(group_boxes):
-            # Start with the current box dimensions
-            new_x = box.x
-            new_y = box.y
-            new_width = box.width
-            new_height = box.height
-
-            # Check against all other boxes for overlap/touching
-            for j, other_box in enumerate(group_boxes):
-                if i == j:
-                    continue
-
-                # Calculate the current separation (or overlap)
-                # Horizontal overlap check
-                box_right = new_x + new_width
-                other_right = other_box.x + other_box.width
-
-                # Vertical overlap check
-                box_bottom = new_y + new_height
-                other_bottom = other_box.y + other_box.height
-
-                # Check if boxes overlap or touch horizontally AND vertically
-                h_overlap = (
-                    new_x < other_right + self.group_box_spacing
-                    and box_right > other_box.x - self.group_box_spacing
-                )
-                v_overlap = (
-                    new_y < other_bottom + self.group_box_spacing
-                    and box_bottom > other_box.y - self.group_box_spacing
-                )
-
-                if h_overlap and v_overlap:
-                    # Boxes are touching or overlapping - we need to shrink this box
-                    # Determine the best way to separate them
-
-                    # Calculate overlap amounts
-                    # Positive = gap, negative = overlap
-                    h_sep_left = other_box.x - box_right
-                    h_sep_right = new_x - other_right
-                    v_sep_top = other_box.y - box_bottom
-                    v_sep_bottom = new_y - other_bottom
-
-                    # If this box's right edge is near/past other's left edge
-                    if (
-                        h_sep_left < self.group_box_spacing
-                        and new_x < other_box.x
-                        and box_right >= other_box.x - self.group_box_spacing
-                    ):
-                        # Shrink width so right edge is spacing away from other's left
-                        needed_shrink = box_right - (
-                            other_box.x - self.group_box_spacing
-                        )
-                        if needed_shrink > 0:
-                            new_width = max(new_width - needed_shrink, 10)
-
-                    # If this box's bottom edge is near/past other's top edge
-                    if (
-                        v_sep_top < self.group_box_spacing
-                        and new_y < other_box.y
-                        and box_bottom >= other_box.y - self.group_box_spacing
-                    ):
-                        # Shrink height so bottom edge is spacing away from other's top
-                        needed_shrink = box_bottom - (
-                            other_box.y - self.group_box_spacing
-                        )
-                        if needed_shrink > 0:
-                            new_height = max(new_height - needed_shrink, 5)
-
-                    # If this box's left edge is near/past other's right edge
-                    if (
-                        h_sep_right < self.group_box_spacing
-                        and new_x > other_box.x
-                        and new_x <= other_right + self.group_box_spacing
-                    ):
-                        # Move left edge and shrink width
-                        needed_move = (other_right + self.group_box_spacing) - new_x
-                        if needed_move > 0:
-                            new_x += needed_move
-                            new_width = max(new_width - needed_move, 10)
-
-                    # If this box's top edge is near/past other's bottom edge
-                    if (
-                        v_sep_bottom < self.group_box_spacing
-                        and new_y > other_box.y
-                        and new_y <= other_bottom + self.group_box_spacing
-                    ):
-                        # Move top edge and shrink height
-                        needed_move = (other_bottom + self.group_box_spacing) - new_y
-                        if needed_move > 0:
-                            new_y += needed_move
-                            new_height = max(new_height - needed_move, 5)
-
-            adjusted_boxes.append(
-                GroupBoundingBox(
-                    group=box.group,
-                    x=new_x,
-                    y=new_y,
-                    width=new_width,
-                    height=new_height,
-                    label_height=box.label_height,
-                )
-            )
-
-        return adjusted_boxes
 
     def calculate_port_x(
         self, box_x: int, box_width: int, port_idx: int, port_count: int
