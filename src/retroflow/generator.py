@@ -72,7 +72,7 @@ class FlowchartGenerator:
         vertical_spacing: int = 3,
         shadow: bool = True,
         rounded: bool = False,
-        compact: bool = False,
+        compact: bool = True,
         font: Optional[str] = None,
         title: Optional[str] = None,
         direction: str = "TB",

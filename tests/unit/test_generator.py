@@ -22,7 +22,7 @@ class TestFlowchartGeneratorInit:
         assert gen.vertical_spacing == 3
         assert gen.shadow is True
         assert gen.rounded is False
-        assert gen.compact is False
+        assert gen.compact is True
         assert gen.font is None
         assert gen.title is None
         assert gen.direction == "TB"
@@ -172,16 +172,16 @@ class TestFlowchartGeneratorGenerate:
 
     def test_generate_with_compact_mode(self, simple_input):
         """Test generating with compact mode produces smaller output."""
-        gen_normal = FlowchartGenerator()
+        gen_padded = FlowchartGenerator(compact=False)
         gen_compact = FlowchartGenerator(compact=True)
 
-        result_normal = gen_normal.generate(simple_input)
+        result_padded = gen_padded.generate(simple_input)
         result_compact = gen_compact.generate(simple_input)
 
         # Compact mode should produce fewer lines
-        lines_normal = result_normal.count("\n")
+        lines_padded = result_padded.count("\n")
         lines_compact = result_compact.count("\n")
-        assert lines_compact < lines_normal
+        assert lines_compact < lines_padded
 
     def test_generate_branching(self, generator, branching_input):
         """Test generating branching flowchart."""
