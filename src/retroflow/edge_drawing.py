@@ -1043,8 +1043,8 @@ class EdgeDrawer:
         # Enter left side of target box
         tgt_port_x = tgt_x
 
-        # Modify source right border to show exit point (tee right)
-        canvas.set(src_port_x, src_port_y, LINE_CHARS["tee_left"])
+        # Note: We don't modify the box border in LR mode - the edge line
+        # starts just outside the box border to avoid visual overlap
 
         # Calculate path
         start_x = src_port_x + 1  # After source (through shadow)
@@ -1263,7 +1263,8 @@ class EdgeDrawer:
             if exit_y >= src_y + src_dims.height - 1:
                 exit_y = src_y + 1
 
-            canvas.set(exit_border_x, exit_y, LINE_CHARS["tee_left"])
+            # Note: We don't modify the box border in LR mode - the edge line
+            # starts just outside the box border to avoid visual overlap
 
             # Check if there are boxes between source and margin that would block
             # the upward vertical path at exit_right_x
