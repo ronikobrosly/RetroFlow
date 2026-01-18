@@ -36,13 +36,14 @@ from .debug import TracedCanvas
 from .edge_drawing import EdgeDrawer
 from .export import FlowchartExporter
 from .layout import LayoutResult, NetworkXLayout
-from .models import ColumnBoundary, LayerBoundary
+from .models import ColumnBoundary, GroupBoundary, LayerBoundary
 from .parser import Parser
 from .positioning import PositionCalculator
 from .renderer import (
     BoxDimensions,
     BoxRenderer,
     Canvas,
+    GroupBoxRenderer,
     TitleRenderer,
 )
 from .tracer import RenderTrace
@@ -117,6 +118,7 @@ class FlowchartGenerator:
             rounded=rounded,
             compact=compact,
         )
+        self.group_box_renderer = GroupBoxRenderer(shadow=shadow)
         self.title_renderer = TitleRenderer()
 
         # Initialize helper objects
@@ -192,14 +194,17 @@ class FlowchartGenerator:
         # Use provided title or fall back to instance title
         effective_title = title if title is not None else self.title
 
-        # Parse input
-        connections = self.parser.parse(input_text)
+        # Parse input (including groups)
+        parse_result = self.parser.parse_with_groups(input_text)
+        connections = parse_result.connections
+        groups = parse_result.groups
 
         if trace:
             trace.add_stage(
                 "parse",
                 {
                     "connections": connections,
+                    "groups": [(g.name, g.members) for g in groups],
                 },
             )
 
@@ -240,7 +245,23 @@ class FlowchartGenerator:
         num_back_edges = len(layout_result.back_edges)
         back_edge_margin = (4 + num_back_edges * 3) if num_back_edges > 0 else 0
 
-        if self.direction == "LR":
+        # Add extra margin if groups are present to ensure edges don't run
+        # too close to group boundaries
+        if groups:
+            from .positioning import GROUP_EDGE_MARGIN
+
+            back_edge_margin = max(back_edge_margin, GROUP_EDGE_MARGIN + 2)
+
+        if groups:
+            # Use group-aware positioning
+            box_positions = self.position_calculator.calculate_group_aware_positions(
+                layout_result,
+                box_dimensions,
+                groups,
+                direction=self.direction,
+                margin=back_edge_margin,
+            )
+        elif self.direction == "LR":
             box_positions = self.position_calculator.calculate_positions_horizontal(
                 layout_result, box_dimensions, top_margin=back_edge_margin
             )
@@ -280,10 +301,89 @@ class FlowchartGenerator:
                 },
             )
 
-        # Calculate canvas size
+        # Calculate group boundaries (if any groups defined)
+        # We calculate them here to determine if we need offsets for negative coords
+        group_boundaries: List[GroupBoundary] = []
+        group_x_offset = 0
+        group_y_offset = 0
+
+        if groups:
+            temp_boundaries = self.position_calculator.calculate_group_boundaries(
+                groups, box_positions, box_dimensions
+            )
+            # Find minimum x/y to determine offset needed
+            for gb in temp_boundaries:
+                if gb.x < 0:
+                    group_x_offset = max(group_x_offset, abs(gb.x))
+                if gb.y < 0:
+                    group_y_offset = max(group_y_offset, abs(gb.y))
+
+        # Apply group offset to box positions if needed
+        if group_x_offset > 0 or group_y_offset > 0:
+            box_positions = {
+                name: (x + group_x_offset, y + group_y_offset)
+                for name, (x, y) in box_positions.items()
+            }
+            # Recalculate group boundaries with offset positions
+            if groups:
+                group_boundaries = self.position_calculator.calculate_group_boundaries(
+                    groups, box_positions, box_dimensions
+                )
+            # Offset layer boundaries for TB mode
+            layer_boundaries = [
+                LayerBoundary(
+                    layer_idx=lb.layer_idx,
+                    top_y=lb.top_y + group_y_offset,
+                    bottom_y=lb.bottom_y + group_y_offset,
+                    gap_start_y=lb.gap_start_y + group_y_offset,
+                    gap_end_y=lb.gap_end_y + group_y_offset,
+                )
+                for lb in layer_boundaries
+            ]
+            # Offset column boundaries for LR mode
+            if self.direction == "LR":
+                column_boundaries = [
+                    ColumnBoundary(
+                        layer_idx=cb.layer_idx,
+                        left_x=cb.left_x + group_x_offset,
+                        right_x=cb.right_x + group_x_offset,
+                        gap_start_x=cb.gap_start_x + group_x_offset,
+                        gap_end_x=cb.gap_end_x + group_x_offset,
+                    )
+                    for cb in column_boundaries
+                ]
+        else:
+            # Just calculate group boundaries with current positions
+            if groups:
+                group_boundaries = self.position_calculator.calculate_group_boundaries(
+                    groups, box_positions, box_dimensions
+                )
+
+        # Resolve any overlapping group boundaries
+        if len(group_boundaries) >= 2:
+            box_positions, group_boundaries = (
+                self.position_calculator.resolve_group_overlaps(
+                    group_boundaries,
+                    box_positions,
+                    box_dimensions,
+                    direction=self.direction,
+                )
+            )
+
+            # Recalculate canvas size after overlap resolution
+            # (groups may have been shifted)
+
+        # Calculate canvas size from nodes
         canvas_width, canvas_height = self.position_calculator.calculate_canvas_size(
             box_dimensions, box_positions
         )
+
+        # Expand canvas to fit group boxes (which may extend beyond nodes)
+        for gb in group_boundaries:
+            group_right = gb.x + gb.width + (2 if self.shadow else 0)
+            group_bottom = gb.y + gb.height + (2 if self.shadow else 0)
+            canvas_width = max(canvas_width, group_right)
+            canvas_height = max(canvas_height, group_bottom)
 
         # Calculate title dimensions and offset
         title_height = 0
@@ -362,6 +462,30 @@ class FlowchartGenerator:
                         )
                         for cb in column_boundaries
                     ]
+
+        # Recalculate group boundaries after box positions are offset
+        if groups:
+            group_boundaries = self.position_calculator.calculate_group_boundaries(
+                groups, box_positions, box_dimensions
+            )
+
+        # Draw group boxes FIRST (so nodes appear on top)
+        if group_boundaries:
+            if isinstance(canvas, TracedCanvas):
+                canvas.set_source("GroupBoxRenderer.draw_group_box")
+            self._draw_groups(canvas, group_boundaries)
+
+            if trace:
+                underlying = (
+                    canvas._canvas if isinstance(canvas, TracedCanvas) else canvas
+                )
+                trace.add_stage(
+                    "groups_drawn",
+                    {
+                        "num_groups": len(group_boundaries),
+                    },
+                    underlying,
+                )
 
         # Draw node boxes
         if isinstance(canvas, TracedCanvas):
@@ -496,6 +620,30 @@ class FlowchartGenerator:
             font=font or self.font,
             scale=scale,
         )
+
+    def _draw_groups(
+        self,
+        canvas: Canvas,
+        group_boundaries: List[GroupBoundary],
+    ) -> None:
+        """
+        Draw all group boxes on the canvas.
+
+        Groups should be drawn before node boxes so nodes appear on top.
+
+        Args:
+            canvas: The canvas to draw on.
+            group_boundaries: List of calculated group boundaries.
+        """
+        for group in group_boundaries:
+            self.group_box_renderer.draw_group_box(
+                canvas,
+                group.x,
+                group.y,
+                group.width,
+                group.height,
+                group.name,
+            )
 
     def _draw_boxes(
         self,

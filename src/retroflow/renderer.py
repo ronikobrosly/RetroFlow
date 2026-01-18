@@ -63,6 +63,17 @@ LINE_CHARS = {
     "cross": "┼",
 }
 
+# Dashed box-drawing characters for group boxes
+DASHED_BOX_CHARS = {
+    "horizontal": "┄",  # Light triple dash horizontal
+    "vertical": "┆",  # Light triple dash vertical
+    "top_left": "┌",  # Corners remain solid for clarity
+    "top_right": "┐",
+    "bottom_left": "└",
+    "bottom_right": "┘",
+    "shadow": "░",
+}
+
 
 @dataclass
 class BoxDimensions:
@@ -493,3 +504,90 @@ class TitleRenderer:
         canvas.set(x + actual_width - 1, y + height - 1, chars["bottom_right"])
 
         return height  # Height of the title box
+
+
+class GroupBoxRenderer:
+    """
+    Renders group boxes with dashed borders and shadows.
+
+    Group boxes visually cluster related nodes together. They use dashed
+    line characters for borders (to distinguish from solid node boxes)
+    and have shadows on the right and bottom edges.
+    """
+
+    def __init__(self, shadow: bool = True):
+        """
+        Initialize the group box renderer.
+
+        Args:
+            shadow: Whether to draw shadows on group boxes.
+        """
+        self.shadow = shadow
+        self.chars = DASHED_BOX_CHARS
+
+    def draw_group_box(
+        self,
+        canvas: Canvas,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        title: str = "",
+    ) -> None:
+        """
+        Draw a group box with dashed border.
+
+        The title is drawn centered above the top border of the box.
+
+        Args:
+            canvas: The canvas to draw on.
+            x: X position of the left edge.
+            y: Y position of the top edge (where title goes).
+            width: Width of the group box.
+            height: Height of the group box (including title row if present).
+            title: Title text to display above the box.
+        """
+        chars = self.chars
+
+        # Calculate title row position and box start
+        title_row = y
+        box_top = y + 1 if title else y
+
+        # Adjust height to account for title
+        box_height = height - 1 if title else height
+
+        # Draw title text (centered above the box)
+        if title:
+            # Center the title over the box
+            title_start = x + (width - len(title)) // 2
+            canvas.draw_text(title_start, title_row, title)
+
+        # Draw top border (solid corners, dashed line)
+        canvas.set(x, box_top, chars["top_left"])
+        for i in range(1, width - 1):
+            canvas.set(x + i, box_top, chars["horizontal"])
+        canvas.set(x + width - 1, box_top, chars["top_right"])
+
+        # Draw sides (dashed vertical lines)
+        for row in range(1, box_height - 1):
+            canvas.set(x, box_top + row, chars["vertical"])
+            canvas.set(x + width - 1, box_top + row, chars["vertical"])
+
+            # Draw shadow on right side
+            if self.shadow:
+                canvas.set(x + width, box_top + row, chars["shadow"])
+
+        # Draw bottom border (solid corners, dashed line)
+        canvas.set(x, box_top + box_height - 1, chars["bottom_left"])
+        for i in range(1, width - 1):
+            canvas.set(x + i, box_top + box_height - 1, chars["horizontal"])
+        canvas.set(x + width - 1, box_top + box_height - 1, chars["bottom_right"])
+
+        # Draw shadow on right side of bottom border
+        if self.shadow:
+            canvas.set(x + width, box_top + box_height - 1, chars["shadow"])
+
+        # Draw bottom shadow
+        if self.shadow:
+            for i in range(1, width + 1):
+                canvas.set(x + i, box_top + box_height, chars["shadow"])

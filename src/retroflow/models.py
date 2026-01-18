@@ -1,16 +1,20 @@
 """
 Data models for flowchart generation.
 
-This module contains dataclasses that represent layout boundaries
-used throughout the flowchart generation process. These models encapsulate the
-geometric information needed for positioning nodes and routing edges.
+This module contains dataclasses that represent layout boundaries and group
+definitions used throughout the flowchart generation process. These models
+encapsulate the geometric information needed for positioning nodes and routing
+edges, as well as group box specifications.
 
 Classes:
     LayerBoundary: Boundary information for a horizontal layer (TB mode).
     ColumnBoundary: Boundary information for a vertical column (LR mode).
+    GroupDefinition: Definition of a node group from parsed input.
+    GroupBoundary: Calculated boundaries for a rendered group box.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List
 
 
 @dataclass
@@ -57,3 +61,57 @@ class ColumnBoundary:
     right_x: int
     gap_start_x: int
     gap_end_x: int
+
+
+@dataclass
+class GroupDefinition:
+    """
+    Definition of a node group from parsed input.
+
+    Groups are specified in the input text using syntax like:
+    [GROUP NAME: node1 node2 node3]
+
+    Attributes:
+        name: Group title/label to display above the group box.
+        members: List of node names that belong to this group.
+        order: Order in which group was defined (for z-ordering when rendering).
+    """
+
+    name: str
+    members: List[str] = field(default_factory=list)
+    order: int = 0
+
+
+@dataclass
+class GroupBoundary:
+    """
+    Calculated boundaries for a rendered group box.
+
+    This is computed after node positions are determined, based on the
+    bounding box of all member nodes plus padding.
+
+    Attributes:
+        name: Group title.
+        members: Node names in this group.
+        x: Left edge x-coordinate of the group box (content area).
+        y: Top edge y-coordinate (below title).
+        width: Width of group box.
+        height: Height of group box (not including title).
+        title_x: X position for centered title.
+        title_y: Y position for title (above box).
+        title_width: Width of title text.
+    """
+
+    name: str
+    members: List[str] = field(default_factory=list)
+
+    # Canvas coordinates (calculated during positioning)
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+
+    # Title positioning
+    title_x: int = 0
+    title_y: int = 0
+    title_width: int = 0

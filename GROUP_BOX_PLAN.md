@@ -584,6 +584,100 @@ The feature is complete when:
 
 ---
 
-*Plan version: 1.0*
+## Implementation Insights (Post-Implementation Lessons)
+
+This section captures key insights learned during the actual implementation and debugging of the group box feature.
+
+### Critical Insight 1: Stacking Orientation
+
+**The most important layout rule for groups:**
+
+| Flow Direction | Node Arrangement WITHIN Groups |
+|---------------|-------------------------------|
+| **TB (Top-to-Bottom)** | Nodes arranged **HORIZONTALLY** (side-by-side) |
+| **LR (Left-to-Right)** | Nodes **STACKED VERTICALLY** |
+
+**Why?** This makes groups visually compact and easier to read. Nodes are arranged **perpendicular to the flow direction**.
+
+**Visual Reference** (see `grouped_boxes.png`):
+- In an LR diagram, the "FASTAPI ML MICROSERVICE" group has all its nodes (Search, Query, SQLite, Wiki, ML, Ranker) stacked vertically within a tall, narrow group box.
+
+**Implementation:** All nodes in a group must share the same primary axis position:
+- **LR mode:** All group members share the same X position (column), stacked at different Y positions
+- **TB mode:** All group members share the same Y position (row), placed at different X positions
+
+### Critical Insight 2: Group Spacing Constants
+
+The following constants are essential for preventing visual issues:
+
+```python
+GROUP_INTERNAL_PADDING = 3   # Space between group border and contained nodes
+GROUP_EXTERNAL_MARGIN = 4    # Space between group boxes (prevents overlap)
+GROUP_TITLE_HEIGHT = 1       # Height reserved for group title
+GROUP_EDGE_MARGIN = 3        # Minimum space between edges and group borders
+```
+
+**Why these values?**
+- `GROUP_INTERNAL_PADDING = 3` (not 2): Provides enough breathing room inside the group
+- `GROUP_EXTERNAL_MARGIN = 4`: Prevents groups from touching/overlapping when in adjacent layers
+- `GROUP_EDGE_MARGIN = 3`: Ensures back-edges don't run too close to group box borders
+
+### Critical Insight 3: Overlap Prevention
+
+Groups can overlap when nodes from different groups are in adjacent layers. The fix requires:
+
+1. **Extra inter-layer spacing:** When different groups have nodes in adjacent layers, add extra vertical (TB) or horizontal (LR) spacing between those layers.
+
+2. **Overlap detection and resolution:** After calculating group boundaries, check for overlaps and shift positions as needed.
+
+3. **The formula for detecting vertical overlap (TB mode):**
+   ```
+   If groups overlap horizontally AND group1_bottom + margin > group2_top:
+       Shift group2's members down by: group1_bottom + margin - group2_top + 1
+   ```
+
+### Critical Insight 4: Group Position Anchoring
+
+When group members span multiple layers (which is common due to edges between them):
+
+1. **Determine the group's "anchor" layer:** The minimum layer index of any member
+2. **Position all group members at the anchor layer's x-position (LR) or y-position (TB)**
+3. **Stack members perpendicular to flow** within that anchor position
+
+This ensures the group box is compact rather than stretched across the entire diagram.
+
+### Critical Insight 5: Edge Margin with Groups
+
+When groups are present, back-edge margins need adjustment:
+
+```python
+if groups:
+    back_edge_margin = max(back_edge_margin, GROUP_EDGE_MARGIN + 2)
+```
+
+This ensures edges routing around the diagram don't run too close to group box borders.
+
+### Common Pitfalls Encountered
+
+| Pitfall | Solution |
+|---------|----------|
+| Groups overlapping at layer boundaries | Add `GROUP_EXTERNAL_MARGIN` spacing between layers with different groups |
+| Nodes spread in flow direction within group | Anchor all group members to leftmost/topmost layer and stack perpendicular |
+| Edges too close to group borders | Add `GROUP_EDGE_MARGIN` to back-edge margin calculations |
+| Group title doesn't fit | Expand group width to accommodate title (already in plan) |
+
+### Reference Implementation Files
+
+The key positioning logic is in `positioning.py`:
+- `calculate_group_aware_positions()` - Main entry point for group-aware positioning
+- `_calculate_positions_tb_grouped()` - TB mode: arranges group members horizontally
+- `_calculate_positions_lr_grouped()` - LR mode: stacks group members vertically
+- `resolve_group_overlaps()` - Detects and fixes overlapping group boundaries
+- `calculate_group_edge_margin()` - Calculates extra margin for edges
+
+---
+
+*Plan version: 1.1*
 *Created: January 2026*
+*Updated: January 2026 (added implementation insights)*
 *Author: Claude Code + Human collaboration*

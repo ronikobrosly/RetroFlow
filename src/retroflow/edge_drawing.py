@@ -144,6 +144,20 @@ class EdgeDrawer:
         src_x, src_y = box_positions[source]
         tgt_x, tgt_y = box_positions[target]
 
+        # Check if target is actually below source (accounting for box height)
+        # This can fail when nodes are grouped and stacked horizontally
+        src_bottom = src_y + src_dims.height + (1 if self.shadow else 0)
+        target_is_below_source = tgt_y > src_bottom
+
+        if not target_is_below_source:
+            # Target is at same y or above (due to grouping)
+            # Route horizontally: exit right, go to target, enter from left
+            self._draw_edge_tb_stacked(
+                canvas, source, target, box_dimensions, box_positions,
+                source_targets, target_sources, layout_result
+            )
+            return
+
         # Check if boxes overlap horizontally (inside borders)
         src_left = src_x + 1
         src_right = src_x + src_dims.width - 2
@@ -358,6 +372,170 @@ class EdgeDrawer:
 
             # Draw arrow one row above target box (doesn't overwrite border)
             canvas.set(tgt_port_x, tgt_port_y - 1, ARROW_CHARS["down"], "arrow_down")
+
+    def _draw_edge_tb_stacked(
+        self,
+        canvas: Canvas,
+        source: str,
+        target: str,
+        box_dimensions: Dict[str, BoxDimensions],
+        box_positions: Dict[str, Tuple[int, int]],
+        source_targets: List[str],
+        target_sources: List[str],
+        layout_result: LayoutResult,
+    ) -> None:
+        """
+        Draw an edge when source and target are horizontally adjacent (same y-position).
+
+        This happens when nodes are grouped together in TB mode. The edge routes
+        horizontally between the boxes - exiting from right and entering from left.
+        If there are intermediate boxes in the path, routes around them below.
+        """
+        src_dims = box_dimensions[source]
+        tgt_dims = box_dimensions[target]
+        src_x, src_y = box_positions[source]
+        tgt_x, tgt_y = box_positions[target]
+
+        # Determine which box is on the left and which is on the right
+        if src_x < tgt_x:
+            goes_right = True
+            src_exit_x = src_x + src_dims.width - 1 + (1 if self.shadow else 0)
+            tgt_entry_x = tgt_x
+            path_left_x = src_exit_x
+            path_right_x = tgt_entry_x
+        else:
+            goes_right = False
+            src_exit_x = src_x
+            tgt_entry_x = tgt_x + tgt_dims.width - 1
+            path_left_x = tgt_entry_x
+            path_right_x = src_exit_x
+
+        # Check for boxes in the horizontal path between source and target
+        boxes_in_path = []
+        for node_name, (node_x, node_y) in box_positions.items():
+            if node_name == source or node_name == target:
+                continue
+            node_dims = box_dimensions[node_name]
+            node_left = node_x
+            node_right = node_x + node_dims.width + (1 if self.shadow else 0)
+
+            # Check if this box overlaps with the horizontal path
+            overlaps_x = node_left < path_right_x and node_right > path_left_x
+            # Check y overlap - boxes at similar y positions
+            src_top = src_y
+            src_bottom = src_y + src_dims.height + (1 if self.shadow else 0)
+            node_top = node_y
+            node_bottom = node_y + node_dims.height + (1 if self.shadow else 0)
+            overlaps_y = node_top < src_bottom and node_bottom > src_top
+
+            if overlaps_x and overlaps_y:
+                boxes_in_path.append((node_name, node_x, node_y, node_dims))
+
+        # Calculate vertical port positions
+        src_port_count = len(source_targets)
+        src_port_idx = source_targets.index(target)
+        tgt_port_count = len(target_sources)
+        tgt_port_idx = target_sources.index(source)
+
+        src_port_y = self.position_calculator.calculate_port_y(
+            src_y, src_dims.height, src_port_idx, src_port_count
+        )
+        tgt_port_y = self.position_calculator.calculate_port_y(
+            tgt_y, tgt_dims.height, tgt_port_idx, tgt_port_count
+        )
+
+        if boxes_in_path:
+            # Route around intermediate boxes - go below all boxes
+            max_bottom_y = src_y + src_dims.height + (1 if self.shadow else 0)
+            max_bottom_y = max(max_bottom_y, tgt_y + tgt_dims.height + (1 if self.shadow else 0))
+            for _, _, node_y, node_dims in boxes_in_path:
+                node_bottom = node_y + node_dims.height + (2 if self.shadow else 0)
+                max_bottom_y = max(max_bottom_y, node_bottom)
+
+            route_y = max_bottom_y + 2  # Route 2 rows below all boxes
+
+            # Exit source from bottom
+            src_port_x = self.position_calculator.calculate_port_x(
+                src_x, src_dims.width, src_port_idx, src_port_count
+            )
+            src_bottom_y = src_y + src_dims.height - 1
+
+            # Enter target from bottom
+            tgt_port_x = self.position_calculator.calculate_port_x(
+                tgt_x, tgt_dims.width, tgt_port_idx, tgt_port_count
+            )
+            tgt_bottom_y = tgt_y + tgt_dims.height - 1
+
+            # Draw: vertical from source bottom to route_y
+            self._draw_vertical_line(canvas, src_port_x, src_bottom_y + 1, route_y)
+
+            # Corner at route_y turning right/left
+            if goes_right:
+                self._set_corner(canvas, src_port_x, route_y, "bottom_left")
+            else:
+                self._set_corner(canvas, src_port_x, route_y, "bottom_right")
+
+            # Horizontal segment at route_y
+            self._draw_horizontal_line(canvas, src_port_x, tgt_port_x, route_y)
+
+            # Corner at target column turning up
+            if goes_right:
+                self._set_corner(canvas, tgt_port_x, route_y, "bottom_right")
+            else:
+                self._set_corner(canvas, tgt_port_x, route_y, "bottom_left")
+
+            # Vertical from route_y up to target bottom
+            self._draw_vertical_line(canvas, tgt_port_x, tgt_bottom_y + 2, route_y)
+
+            # Arrow pointing up at target bottom border
+            canvas.set(tgt_port_x, tgt_bottom_y + 1, ARROW_CHARS["up"])
+
+        elif src_port_y == tgt_port_y:
+            # Direct horizontal line (no intermediate boxes, same y port)
+            if goes_right:
+                self._draw_horizontal_line(canvas, src_exit_x, tgt_entry_x - 2, src_port_y)
+                canvas.set(tgt_entry_x - 1, tgt_port_y, ARROW_CHARS["right"])
+            else:
+                self._draw_horizontal_line(canvas, tgt_entry_x + 2, src_exit_x, src_port_y)
+                canvas.set(tgt_entry_x + 1, tgt_port_y, ARROW_CHARS["left"])
+        else:
+            # Route with vertical segment (no intermediate boxes, different y ports)
+            if goes_right:
+                mid_x = (src_exit_x + tgt_entry_x) // 2
+                self._draw_horizontal_line(canvas, src_exit_x, mid_x, src_port_y)
+
+                if tgt_port_y > src_port_y:
+                    self._set_corner(canvas, mid_x, src_port_y, "top_right")
+                    self._set_corner(canvas, mid_x, tgt_port_y, "bottom_left")
+                else:
+                    self._set_corner(canvas, mid_x, src_port_y, "bottom_right")
+                    self._set_corner(canvas, mid_x, tgt_port_y, "top_left")
+
+                if tgt_port_y > src_port_y:
+                    self._draw_vertical_line(canvas, mid_x, src_port_y + 1, tgt_port_y - 1)
+                else:
+                    self._draw_vertical_line(canvas, mid_x, tgt_port_y + 1, src_port_y - 1)
+
+                self._draw_horizontal_line(canvas, mid_x, tgt_entry_x - 2, tgt_port_y)
+                canvas.set(tgt_entry_x - 1, tgt_port_y, ARROW_CHARS["right"])
+            else:
+                mid_x = (tgt_entry_x + src_exit_x) // 2
+                self._draw_horizontal_line(canvas, mid_x, src_exit_x, src_port_y)
+
+                if tgt_port_y > src_port_y:
+                    self._set_corner(canvas, mid_x, src_port_y, "top_left")
+                    self._set_corner(canvas, mid_x, tgt_port_y, "bottom_right")
+                else:
+                    self._set_corner(canvas, mid_x, src_port_y, "bottom_left")
+                    self._set_corner(canvas, mid_x, tgt_port_y, "top_right")
+
+                if tgt_port_y > src_port_y:
+                    self._draw_vertical_line(canvas, mid_x, src_port_y + 1, tgt_port_y - 1)
+                else:
+                    self._draw_vertical_line(canvas, mid_x, tgt_port_y + 1, src_port_y - 1)
+
+                self._draw_horizontal_line(canvas, tgt_entry_x + 2, mid_x, tgt_port_y)
+                canvas.set(tgt_entry_x + 1, tgt_port_y, ARROW_CHARS["left"])
 
     def _get_safe_horizontal_y(
         self,
@@ -931,6 +1109,20 @@ class EdgeDrawer:
         src_x, src_y = box_positions[source]
         tgt_x, tgt_y = box_positions[target]
 
+        # Check if target is actually to the right of source (accounting for box width)
+        # This can fail when nodes are grouped and stacked vertically
+        src_right = src_x + src_dims.width + (1 if self.shadow else 0)
+        target_is_right_of_source = tgt_x > src_right
+
+        if not target_is_right_of_source:
+            # Target is at same x or to the left (due to grouping)
+            # Route around: exit right, go to routing column, go down/up, enter from left
+            self._draw_edge_horizontal_stacked(
+                canvas, source, target, box_dimensions, box_positions,
+                source_targets, target_sources, layout_result
+            )
+            return
+
         # Check if boxes overlap vertically (inside borders)
         # For compact boxes (height 3), there's only one content row at y+1
         src_top = src_y + 1
@@ -1165,6 +1357,171 @@ class EdgeDrawer:
 
             # Arrow
             canvas.set(tgt_port_x - 1, tgt_port_y, ARROW_CHARS["right"])
+
+    def _draw_edge_horizontal_stacked(
+        self,
+        canvas: Canvas,
+        source: str,
+        target: str,
+        box_dimensions: Dict[str, BoxDimensions],
+        box_positions: Dict[str, Tuple[int, int]],
+        source_targets: List[str],
+        target_sources: List[str],
+        layout_result: LayoutResult,
+    ) -> None:
+        """
+        Draw an edge when source and target are vertically stacked (same x-position).
+
+        This happens when nodes are grouped together in LR mode. The edge routes
+        vertically between the boxes - exiting from bottom/top and entering from top/bottom.
+        If there are intermediate boxes in the path, routes around them to the right.
+        """
+        src_dims = box_dimensions[source]
+        tgt_dims = box_dimensions[target]
+        src_x, src_y = box_positions[source]
+        tgt_x, tgt_y = box_positions[target]
+
+        # Determine which box is on top and which is on bottom
+        if src_y < tgt_y:
+            goes_down = True
+            src_exit_y = src_y + src_dims.height - 1 + (1 if self.shadow else 0)
+            tgt_entry_y = tgt_y
+            path_top_y = src_exit_y
+            path_bottom_y = tgt_entry_y
+        else:
+            goes_down = False
+            src_exit_y = src_y
+            tgt_entry_y = tgt_y + tgt_dims.height - 1
+            path_top_y = tgt_entry_y
+            path_bottom_y = src_exit_y
+
+        # Check for boxes in the vertical path between source and target
+        boxes_in_path = []
+        for node_name, (node_x, node_y) in box_positions.items():
+            if node_name == source or node_name == target:
+                continue
+            node_dims = box_dimensions[node_name]
+            node_top = node_y
+            node_bottom = node_y + node_dims.height + (1 if self.shadow else 0)
+
+            # Check if this box overlaps with the vertical path
+            # Box must be in the x range AND y range
+            overlaps_y = node_top < path_bottom_y and node_bottom > path_top_y
+            # Check x overlap - boxes at similar x positions
+            src_left = src_x
+            src_right = src_x + src_dims.width + (1 if self.shadow else 0)
+            node_left = node_x
+            node_right = node_x + node_dims.width + (1 if self.shadow else 0)
+            overlaps_x = node_left < src_right and node_right > src_left
+
+            if overlaps_y and overlaps_x:
+                boxes_in_path.append((node_name, node_x, node_y, node_dims))
+
+        # Calculate horizontal port positions
+        src_port_count = len(source_targets)
+        src_port_idx = source_targets.index(target)
+        tgt_port_count = len(target_sources)
+        tgt_port_idx = target_sources.index(source)
+
+        def calculate_port_x(box_x: int, box_width: int, port_idx: int, port_count: int) -> int:
+            content_start = box_x + 1
+            content_width = box_width - 2
+            if port_count == 1:
+                return content_start + content_width // 2
+            else:
+                spacing = content_width // (port_count + 1)
+                return content_start + spacing * (port_idx + 1)
+
+        src_port_x = calculate_port_x(src_x, src_dims.width, src_port_idx, src_port_count)
+        tgt_port_x = calculate_port_x(tgt_x, tgt_dims.width, tgt_port_idx, tgt_port_count)
+
+        if boxes_in_path:
+            # Route around intermediate boxes - go to the right side
+            max_right_x = src_x + src_dims.width + (1 if self.shadow else 0)
+            max_right_x = max(max_right_x, tgt_x + tgt_dims.width + (1 if self.shadow else 0))
+            for _, node_x, _, node_dims in boxes_in_path:
+                node_right = node_x + node_dims.width + (2 if self.shadow else 0)
+                max_right_x = max(max_right_x, node_right)
+
+            route_x = max_right_x + 2  # Route 2 chars to the right of all boxes
+
+            # Exit source from right side
+            src_port_y = self.position_calculator.calculate_port_y(
+                src_y, src_dims.height, src_port_idx, src_port_count
+            )
+            src_right_x = src_x + src_dims.width - 1
+
+            # Enter target from right side
+            tgt_port_y = self.position_calculator.calculate_port_y(
+                tgt_y, tgt_dims.height, tgt_port_idx, tgt_port_count
+            )
+            tgt_right_x = tgt_x + tgt_dims.width - 1
+
+            # Draw: horizontal from source right to route_x
+            self._draw_horizontal_line(canvas, src_right_x, route_x, src_port_y)
+
+            # Corner at route_x turning down/up
+            if goes_down:
+                self._set_corner(canvas, route_x, src_port_y, "top_right")
+            else:
+                self._set_corner(canvas, route_x, src_port_y, "bottom_right")
+
+            # Vertical segment
+            if goes_down:
+                self._draw_vertical_line(canvas, route_x, src_port_y + 1, tgt_port_y - 1)
+            else:
+                self._draw_vertical_line(canvas, route_x, tgt_port_y + 1, src_port_y - 1)
+
+            # Corner at target row turning left
+            if goes_down:
+                self._set_corner(canvas, route_x, tgt_port_y, "bottom_left")
+            else:
+                self._set_corner(canvas, route_x, tgt_port_y, "top_left")
+
+            # Horizontal from route_x back to target right
+            self._draw_horizontal_line(canvas, tgt_right_x + 1, route_x, tgt_port_y)
+
+            # Arrow pointing left at target right border
+            canvas.set(tgt_right_x + 1, tgt_port_y, ARROW_CHARS["left"])
+
+        elif src_port_x == tgt_port_x:
+            # Direct vertical line (no intermediate boxes, same x port)
+            if goes_down:
+                self._draw_vertical_line(canvas, src_port_x, src_exit_y, tgt_entry_y - 2)
+                canvas.set(src_port_x, tgt_entry_y - 1, ARROW_CHARS["down"])
+            else:
+                self._draw_vertical_line(canvas, src_port_x, tgt_entry_y + 2, src_exit_y)
+                canvas.set(src_port_x, tgt_entry_y + 1, ARROW_CHARS["up"])
+        else:
+            # Route with horizontal segment (no intermediate boxes, different x ports)
+            if goes_down:
+                mid_y = (src_exit_y + tgt_entry_y) // 2
+                self._draw_vertical_line(canvas, src_port_x, src_exit_y, mid_y)
+
+                if tgt_port_x > src_port_x:
+                    self._set_corner(canvas, src_port_x, mid_y, "bottom_left")
+                    self._set_corner(canvas, tgt_port_x, mid_y, "top_right")
+                else:
+                    self._set_corner(canvas, src_port_x, mid_y, "bottom_right")
+                    self._set_corner(canvas, tgt_port_x, mid_y, "top_left")
+
+                self._draw_horizontal_line(canvas, src_port_x, tgt_port_x, mid_y)
+                self._draw_vertical_line(canvas, tgt_port_x, mid_y, tgt_entry_y - 2)
+                canvas.set(tgt_port_x, tgt_entry_y - 1, ARROW_CHARS["down"])
+            else:
+                mid_y = (tgt_entry_y + src_exit_y) // 2
+                self._draw_vertical_line(canvas, src_port_x, mid_y, src_exit_y)
+
+                if tgt_port_x > src_port_x:
+                    self._set_corner(canvas, src_port_x, mid_y, "top_left")
+                    self._set_corner(canvas, tgt_port_x, mid_y, "bottom_right")
+                else:
+                    self._set_corner(canvas, src_port_x, mid_y, "top_right")
+                    self._set_corner(canvas, tgt_port_x, mid_y, "bottom_left")
+
+                self._draw_horizontal_line(canvas, src_port_x, tgt_port_x, mid_y)
+                self._draw_vertical_line(canvas, tgt_port_x, tgt_entry_y + 2, mid_y)
+                canvas.set(tgt_port_x, tgt_entry_y + 1, ARROW_CHARS["up"])
 
     def draw_back_edges_horizontal(
         self,
