@@ -58,10 +58,13 @@ node3 -> nodeA
 
 ### Layout Requirements
 
+See the `grouped_boxes.png` image for an example of a clean layout with group boxes. 
+
 1. **Group hierarchy takes priority**: Nodes within a group are positioned together, even if the global graph structure would place them in different layers
 2. **Single membership**: A node can belong to at most one group (enforced during parsing)
 3. **Ungrouped node margins**: When groups exist, ungrouped nodes receive extra margin to prevent visual crowding
 4. **Both directions**: Works in TB (top-to-bottom) and LR (left-to-right) modes
+5. **No overlapping**: VERY IMPORTANT: Under no circumstances should text boxes overlap or sit too closely with each other, no group boxes should overlap or sit too closely with each other, and no group box boundaries should overlap or sit too closely with text boxes. 
 
 ---
 
@@ -420,7 +423,7 @@ Edges between nodes within the same group should route normally. The group box i
 
 Back edges (cycle edges) currently route along the left margin (TB) or top margin (LR). This should continue to work with groups, but may need adjustment if a back edge's source/target is inside a group.
 
-**Potential issue:** Back edge margin calculation may need to account for group box width.
+**Potential issue:** Back edge margin calculation will absolutely need to account for group box width.
 
 ---
 
@@ -449,7 +452,7 @@ Back edges (cycle edges) currently route along the left margin (TB) or top margi
 
 ### Visual Regression Tests
 
-Use the existing `extensive_retroflow_testing.py` tests 41-81 as the baseline. These should produce valid output once the feature is implemented.
+Use the existing `extensive_retroflow_testing.py` tests 41-81 as the baseline. These should produce valid output once the feature is implemented. Ensure that the output files of these tests don't contain broken arrow lines (AKA edges), that there aren't free floating arrows or missing arrows, and that no boxes (whether group or text boxes) overlap.
 
 ---
 
@@ -555,16 +558,6 @@ The feature is complete when:
 ┆    ░░░░░░░░░░░░   ┆░
 └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
  ░░░░░░░░░░░░░░░░░░░░░
-```
-
-### Title on Top Border (Alternative Style)
-
-```
-┌┄┄ GROUP TITLE ┄┄┄┄┐
-┆                   ┆░
-┆  ┌───────────┐    ┆░
-┆  │  NODE A   │░   ┆░
-...
 ```
 
 ---
