@@ -121,6 +121,7 @@ print(flowchart)
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
 - **Title banners**: Optional double-line bordered titles with automatic word wrapping
 - **Horizontal flow**: Left-to-right layout mode for compact linear diagrams
+- **Group boxes**: Experimental, visually cluster related nodes within dashed-border containers with titles
 
 ## Usage
 
@@ -313,11 +314,67 @@ result = generator.generate("""
 
 This produces a horizontal flowchart where nodes flow from left to right, which can be more compact for linear processes.
 
+### Group Boxes (Experimental)
+
+Group boxes let you visually cluster related nodes together within a labeled container. This is useful for showing subsystems, modules, or logical groupings.
+
+Group boxes work well as long as your diagram is complex, with several groups and fully-connected nodes. 
+
+Define groups at the **top** of your input, before edge definitions:
+
+```python
+generator = FlowchartGenerator()
+
+result = generator.generate("""
+[API Layer: Gateway Auth]
+[Data Layer: Database Cache]
+
+Gateway -> Auth
+Auth -> Database
+Database -> Cache
+Gateway -> Cache
+""")
+print(result)
+```
+
+**Syntax**: `[GROUP TITLE: node1 node2 node3]`
+- Text before the colon is the group title (displayed above the group box)
+- Text after the colon is a space-separated list of node names
+- Multi-word node names work automatically (matched against nodes in edges)
+
+**Example output**:
+```
+     API LAYER
+┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+┆                   ┆░
+┆  ┌───────────┐    ┆░
+┆  │  Gateway  │░   ┆░
+┆  └───────────┘░   ┆░
+┆    ░░░░░░░░░░░░   ┆░
+┆        │          ┆░
+┆        ▼          ┆░
+┆  ┌───────────┐    ┆░
+┆  │   Auth    │░   ┆░
+┆  └───────────┘░   ┆░
+┆    ░░░░░░░░░░░░   ┆░
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
+ ░░░░░░░░░░░░░░░░░░░░░
+```
+
+**Rules**:
+- Each node can belong to at most one group
+- Group definitions must appear before any edge definitions
+- Nodes within groups are arranged perpendicular to the flow direction (horizontally in TB mode, vertically in LR mode)
+
 ## Input Format
 
 The input format uses a simple arrow syntax:
 
 ```
+# Optional: Group definitions (must come first)
+[Frontend: Login Dashboard]
+[Backend: API Database]
+
 # Comments start with #
 NodeA -> NodeB
 NodeB -> NodeC
@@ -334,6 +391,7 @@ Validate Credentials -> Access Granted
 - Empty lines are ignored
 - Lines starting with `#` are comments
 - Node names can contain spaces
+- Group definitions use `[Group Name: node1 node2]` syntax and must appear before edges
 
 ## API Reference
 

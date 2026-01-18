@@ -191,9 +191,7 @@ class Parser:
 
         return groups
 
-    def _match_node_names(
-        self, member_text: str, known_nodes: Set[str]
-    ) -> List[str]:
+    def _match_node_names(self, member_text: str, known_nodes: Set[str]) -> List[str]:
         """
         Match member text against known node names using greedy longest-first.
 

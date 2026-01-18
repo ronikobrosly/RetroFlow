@@ -35,6 +35,8 @@ test_*.txt
 
 grouped_boxes.png
 
+GROUP_BOX_PLAN.md
+
 # C extensions
 *.so
 

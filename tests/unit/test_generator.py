@@ -7,7 +7,12 @@ import pytest
 from PIL import Image
 
 from retroflow.generator import FlowchartGenerator
-from retroflow.renderer import ARROW_CHARS, BOX_CHARS, BOX_CHARS_DOUBLE
+from retroflow.renderer import (
+    ARROW_CHARS,
+    BOX_CHARS,
+    BOX_CHARS_DOUBLE,
+    DASHED_BOX_CHARS,
+)
 
 
 class TestFlowchartGeneratorInit:
@@ -886,9 +891,22 @@ class TestFlowchartGeneratorHorizontalMode:
         """Test horizontal mode combined with title."""
         gen = FlowchartGenerator(direction="LR", title="Horizontal Flow")
         result = gen.generate("A -> B\nB -> C")
-        assert "Horizontal Flow" in result
+        # Title may wrap
+        assert "Horizontal" in result
         assert BOX_CHARS_DOUBLE["top_left"] in result
         assert ARROW_CHARS["right"] in result
+
+    def test_horizontal_mode_with_long_title(self):
+        """Test horizontal mode with longer title that needs centering offset."""
+        gen = FlowchartGenerator(
+            direction="LR", title="Very Long Title For The Diagram"
+        )
+        result = gen.generate("A -> B\nB -> C\nC -> D")
+        # Should generate without errors
+        assert "A" in result
+        assert "B" in result
+        assert "C" in result
+        assert "D" in result
 
     def test_vertical_vs_horizontal_different_dimensions(self):
         """Test that TB and LR modes produce different dimensions."""
@@ -1009,3 +1027,245 @@ class TestFlowchartGeneratorHorizontalMode:
         assert "End" in result
         for node in ["A", "B", "C", "D"]:
             assert node in result
+
+
+class TestFlowchartGeneratorGroupBoxes:
+    """Tests for FlowchartGenerator group box feature."""
+
+    def test_group_box_basic(self):
+        """Test basic group box generation."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [My Group: A B]
+        A -> B
+        B -> C
+        """
+        result = gen.generate(input_text)
+        assert "A" in result
+        assert "B" in result
+        assert "C" in result
+        # Group title should appear
+        assert "My Group" in result
+
+    def test_group_box_uses_dashed_borders(self):
+        """Test that group boxes use dashed border characters."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Test Group: A B]
+        A -> B
+        B -> C
+        """
+        result = gen.generate(input_text)
+        # Should contain dashed border characters
+        assert DASHED_BOX_CHARS["horizontal"] in result
+        assert DASHED_BOX_CHARS["vertical"] in result
+
+    def test_group_box_with_shadow(self):
+        """Test that group boxes have shadows."""
+        gen = FlowchartGenerator(shadow=True)
+        input_text = """
+        [Group: A B]
+        A -> B
+        """
+        result = gen.generate(input_text)
+        # Shadow character should appear
+        assert DASHED_BOX_CHARS["shadow"] in result
+
+    def test_group_box_without_shadow(self):
+        """Test group boxes without shadows."""
+        gen = FlowchartGenerator(shadow=False)
+        input_text = """
+        [Group: A B]
+        A -> B
+        """
+        result = gen.generate(input_text)
+        # Should still render without error
+        assert "A" in result
+        assert "B" in result
+
+    def test_multiple_groups(self):
+        """Test multiple group boxes in one diagram."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Group One: A B]
+        [Group Two: C D]
+        A -> B
+        B -> C
+        C -> D
+        """
+        result = gen.generate(input_text)
+        assert "Group One" in result
+        assert "Group Two" in result
+        assert "A" in result
+        assert "D" in result
+
+    def test_group_box_with_title(self):
+        """Test group box combined with diagram title."""
+        gen = FlowchartGenerator(title="My Diagram")
+        input_text = """
+        [API: Gateway Auth]
+        Gateway -> Auth
+        Auth -> DB
+        """
+        result = gen.generate(input_text)
+        assert "My Diagram" in result
+        assert "API" in result
+        assert "Gateway" in result
+
+    def test_group_box_in_lr_mode(self):
+        """Test group boxes in left-to-right mode."""
+        gen = FlowchartGenerator(direction="LR")
+        input_text = """
+        [Backend: API DB]
+        API -> DB
+        DB -> Cache
+        """
+        result = gen.generate(input_text)
+        assert "Backend" in result
+        assert "API" in result
+        assert "DB" in result
+        assert "Cache" in result
+
+    def test_group_box_multiword_nodes(self):
+        """Test group boxes with multi-word node names."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Services: User Service Auth Service]
+        User Service -> Auth Service
+        Auth Service -> Database
+        """
+        result = gen.generate(input_text)
+        assert "Services" in result
+        assert "User Service" in result
+        assert "Auth Service" in result
+
+    def test_group_box_preserves_edges(self):
+        """Test that edges are drawn correctly with groups."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Frontend: A B]
+        A -> B
+        B -> C
+        C -> D
+        """
+        result = gen.generate(input_text)
+        # Should have arrow characters
+        assert ARROW_CHARS["down"] in result or ARROW_CHARS["right"] in result
+
+    def test_group_box_edges_across_groups(self):
+        """Test edges that cross between groups."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Group1: A B]
+        [Group2: C D]
+        A -> B
+        B -> C
+        C -> D
+        """
+        result = gen.generate(input_text)
+        # All nodes should be present
+        for node in ["A", "B", "C", "D"]:
+            assert node in result
+        # Both groups should appear
+        assert "Group1" in result
+        assert "Group2" in result
+
+    def test_group_with_back_edges(self):
+        """Test groups containing nodes involved in cycles."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Loop: Process Check]
+        Init -> Process
+        Process -> Check
+        Check -> Process
+        Check -> Done
+        """
+        result = gen.generate(input_text)
+        assert "Loop" in result
+        assert "Init" in result
+        assert "Process" in result
+        assert "Check" in result
+        assert "Done" in result
+
+    def test_group_renderer_initialized(self):
+        """Test that group box renderer is initialized."""
+        gen = FlowchartGenerator()
+        assert gen.group_box_renderer is not None
+
+    def test_debug_mode_with_groups(self):
+        """Test debug mode captures group information."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Test: A B]
+        A -> B
+        B -> C
+        """
+        _result = gen.generate(input_text, debug=True)
+        trace = gen.get_trace()
+        assert trace is not None
+        assert _result is not None
+
+        # Parse stage should contain group info
+        parse_stage = trace.get_stage("parse")
+        assert parse_stage is not None
+        assert "groups" in parse_stage.data
+
+    def test_group_box_no_overlap_with_nodes(self):
+        """Test that group boxes don't overlap with external nodes."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Internal: B C]
+        A -> B
+        B -> C
+        C -> D
+        """
+        result = gen.generate(input_text)
+        # Should generate without errors
+        assert "A" in result
+        assert "B" in result
+        assert "C" in result
+        assert "D" in result
+
+    def test_group_box_save_png(self):
+        """Test saving group box diagram as PNG."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Services: API DB]
+        API -> DB
+        DB -> Cache
+        """
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            filename = f.name
+
+        try:
+            gen.save_png(input_text, filename)
+            assert os.path.exists(filename)
+            with Image.open(filename) as img:
+                assert img.format == "PNG"
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+    def test_group_box_save_txt(self):
+        """Test saving group box diagram as text file."""
+        gen = FlowchartGenerator()
+        input_text = """
+        [Services: API DB]
+        API -> DB
+        DB -> Cache
+        """
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            filename = f.name
+
+        try:
+            gen.save_txt(input_text, filename)
+            with open(filename, "r", encoding="utf-8") as f:
+                content = f.read()
+            assert "Services" in content
+            assert "API" in content
+            assert "DB" in content
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)

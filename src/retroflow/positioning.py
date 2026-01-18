@@ -688,21 +688,27 @@ class PositionCalculator:
         # Group members by their group, keeping track of layer info
         group_members: Dict[str, List[str]] = {}
         for group in groups:
-            valid_members = [
-                m for m in group.members if m in node_to_layer
-            ]
+            valid_members = [m for m in group.members if m in node_to_layer]
             if valid_members:
                 group_members[group.name] = valid_members
 
         if direction == "LR":
             return self._calculate_positions_lr_grouped(
-                layout_result, box_dimensions, node_to_group,
-                group_members, node_to_layer, margin
+                layout_result,
+                box_dimensions,
+                node_to_group,
+                group_members,
+                node_to_layer,
+                margin,
             )
         else:
             return self._calculate_positions_tb_grouped(
-                layout_result, box_dimensions, node_to_group,
-                group_members, node_to_layer, margin
+                layout_result,
+                box_dimensions,
+                node_to_group,
+                group_members,
+                node_to_layer,
+                margin,
             )
 
     def _calculate_positions_tb_grouped(
@@ -744,10 +750,13 @@ class PositionCalculator:
         for group_name, members in group_members.items():
             if len(members) > 1:
                 # Calculate total height needed for all group members
-                total_height = sum(
-                    box_dimensions[m].height + (2 if self.shadow else 0)
-                    for m in members
-                ) + (len(members) - 1) * self.vertical_spacing
+                total_height = (
+                    sum(
+                        box_dimensions[m].height + (2 if self.shadow else 0)
+                        for m in members
+                    )
+                    + (len(members) - 1) * self.vertical_spacing
+                )
                 # Find max height in the group's top layer
                 top_layer = group_top_layer[group_name]
                 layer_max_height = layer_heights[top_layer]
@@ -795,10 +804,13 @@ class PositionCalculator:
                 if top_layer == layer_idx:
                     # Group width = sum of member widths + spacing
                     members = group_members[group_name]
-                    group_width = sum(
-                        box_dimensions[m].width + (1 if self.shadow else 0)
-                        for m in members
-                    ) + (len(members) - 1) * self.horizontal_spacing
+                    group_width = (
+                        sum(
+                            box_dimensions[m].width + (1 if self.shadow else 0)
+                            for m in members
+                        )
+                        + (len(members) - 1) * self.horizontal_spacing
+                    )
                     contents.append((group_name, group_width, True))
             layer_contents.append(contents)
 
@@ -874,8 +886,7 @@ class PositionCalculator:
             if len(members) > 1:
                 # Find the widest member
                 max_member_width = max(
-                    box_dimensions[m].width + (1 if self.shadow else 0)
-                    for m in members
+                    box_dimensions[m].width + (1 if self.shadow else 0) for m in members
                 )
                 # Compare to the left layer's width
                 left_layer = group_left_layer[group_name]
@@ -925,10 +936,13 @@ class PositionCalculator:
                 if left_layer == layer_idx:
                     # Group height = sum of member heights + spacing
                     members = group_members[group_name]
-                    group_height = sum(
-                        box_dimensions[m].height + (2 if self.shadow else 0)
-                        for m in members
-                    ) + (len(members) - 1) * self.vertical_spacing
+                    group_height = (
+                        sum(
+                            box_dimensions[m].height + (2 if self.shadow else 0)
+                            for m in members
+                        )
+                        + (len(members) - 1) * self.vertical_spacing
+                    )
                     contents.append((group_name, group_height, True))
             layer_contents.append(contents)
 

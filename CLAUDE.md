@@ -88,6 +88,7 @@ The `publish.yml` workflow will automatically:
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
 - **Title banners**: Optional double-line bordered titles with automatic word wrapping (at ~15 chars)
 - **Horizontal flow**: Left-to-right layout mode (`direction="LR"`) for compact diagrams
+- **Group boxes**: Visually cluster related nodes within dashed-border containers with titles
 
 
 ## Project Structure
@@ -124,13 +125,13 @@ retroflow/
 
 | File | Purpose |
 |------|---------|
-| `generator.py` | Main `FlowchartGenerator` class - orchestrates parsing, layout, positioning, edge drawing, and export |
-| `parser.py` | Parses `A -> B` text syntax into connection tuples |
+| `generator.py` | Main `FlowchartGenerator` class - orchestrates parsing, layout, positioning, edge drawing, group rendering, and export |
+| `parser.py` | Parses `A -> B` text syntax into connection tuples; also parses group definitions (`[GROUP: nodes]`) |
 | `layout.py` | `NetworkXLayout` class using networkx for graph representation, cycle detection, topological sorting, and barycenter-based node ordering. `SugiyamaLayout` is an alias for backwards compatibility. |
-| `renderer.py` | `Canvas` for 2D character grid, `BoxRenderer` for Unicode box drawing with shadows, `LineRenderer` for edge drawing utilities |
+| `renderer.py` | `Canvas` for 2D character grid, `BoxRenderer` for Unicode box drawing with shadows, `GroupBoxRenderer` for dashed group boxes, `LineRenderer` for edge drawing utilities |
 | `router.py` | `EdgeRouter` for port allocation and orthogonal edge routing (utility module for future use) |
-| `models.py` | Data models for layout boundaries used throughout the generation process |
-| `positioning.py` | `PositionCalculator` class for calculating node positions, layer/column boundaries, and port positions |
+| `models.py` | Data models for layout boundaries (`LayerBoundary`, `ColumnBoundary`) and group definitions (`GroupDefinition`, `GroupBoundary`) |
+| `positioning.py` | `PositionCalculator` class for calculating node positions, layer/column boundaries, port positions, and group-aware positioning |
 | `edge_drawing.py` | `EdgeDrawer` class for rendering forward and back edges in TB and LR modes |
 | `export.py` | `FlowchartExporter` class for PNG and text file export with font handling |
 | `tracer.py` | Debug tracing infrastructure - `RenderTrace`, `PipelineStage`, `CharacterPlacement` for capturing rendering decisions |
@@ -311,3 +312,107 @@ canvas.set(x, y, LINE_CHARS["vertical"], "my_new_vertical_segment")
 # Also acceptable - TracedCanvas will infer a basic reason
 canvas.set(x, y, LINE_CHARS["vertical"])
 ```
+
+
+## Group Box Feature
+
+Group boxes allow users to visually cluster related nodes together within a labeled container. This makes diagrams easier to read and understand, especially when depicting systems with distinct subsystems or logical groupings.
+
+### Syntax
+
+Groups are defined at the top of input text, **before** edge definitions:
+
+```
+[GROUP TITLE: node1 node2 node3]
+[ANOTHER GROUP: nodeA nodeB]
+
+node1 -> node2
+node2 -> node3
+nodeA -> nodeB
+node3 -> nodeA
+```
+
+- Text before the colon is the **group title** (centered above the group box)
+- Text after the colon is a **space-separated list of node names**
+- Multi-word node names are supported (matched against nodes found in edges)
+- Group definitions must appear before any edge definitions
+
+### Example Usage
+
+```python
+from retroflow import FlowchartGenerator
+
+generator = FlowchartGenerator()
+
+result = generator.generate("""
+[API Layer: Gateway Auth]
+[Data Layer: Database Cache]
+
+Gateway -> Auth
+Auth -> Database
+Database -> Cache
+Gateway -> Cache
+""")
+
+print(result)
+```
+
+### Visual Appearance
+
+Group boxes have:
+- **Dashed borders**: Using `┄` (horizontal) and `┆` (vertical) characters
+- **Solid corners**: Standard box-drawing corners (┌ ┐ └ ┘) for clarity
+- **Shadows**: On right and bottom edges (same as node boxes, can be disabled)
+- **Centered title**: Displayed above the group box
+
+Example output:
+```
+     API LAYER
+┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+┆                   ┆░
+┆  ┌───────────┐    ┆░
+┆  │  Gateway  │░   ┆░
+┆  └───────────┘░   ┆░
+┆    ░░░░░░░░░░░░   ┆░
+┆        │          ┆░
+┆        ▼          ┆░
+┆  ┌───────────┐    ┆░
+┆  │   Auth    │░   ┆░
+┆  └───────────┘░   ┆░
+┆    ░░░░░░░░░░░░   ┆░
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
+ ░░░░░░░░░░░░░░░░░░░░░
+```
+
+### Layout Behavior
+
+| Flow Direction | Node Arrangement Within Groups |
+|---------------|-------------------------------|
+| **TB (Top-to-Bottom)** | Nodes arranged **horizontally** (side-by-side) |
+| **LR (Left-to-Right)** | Nodes arranged **vertically** (stacked) |
+
+Nodes are arranged **perpendicular to the flow direction** within groups, making groups visually compact.
+
+### Validation Rules
+
+- A node can belong to **at most one group** (enforced during parsing)
+- All group members must exist in at least one edge definition
+- Group definitions must appear before edge definitions in the input
+
+### Data Models
+
+| Class | Location | Purpose |
+|-------|----------|---------|
+| `GroupDefinition` | `models.py` | Parsed group from input (name, members, order) |
+| `GroupBoundary` | `models.py` | Calculated boundaries for rendering (x, y, width, height, title position) |
+| `ParseResult` | `parser.py` | Combined result of parsing (connections + groups) |
+
+### Implementation Files
+
+| File | Group-Related Changes |
+|------|----------------------|
+| `parser.py` | `parse_with_groups()` method, group syntax parsing, multi-word node matching |
+| `positioning.py` | `calculate_group_aware_positions()`, `calculate_group_boundaries()`, `resolve_group_overlaps()` |
+| `renderer.py` | `GroupBoxRenderer` class, `DASHED_BOX_CHARS` constants |
+| `generator.py` | Group orchestration in `generate()`, `_draw_groups()` method |
+| `models.py` | `GroupDefinition`, `GroupBoundary` dataclasses |

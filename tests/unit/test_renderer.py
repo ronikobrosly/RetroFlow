@@ -4,10 +4,12 @@ from retroflow.renderer import (
     ARROW_CHARS,
     BOX_CHARS,
     BOX_CHARS_DOUBLE,
+    DASHED_BOX_CHARS,
     LINE_CHARS,
     BoxDimensions,
     BoxRenderer,
     Canvas,
+    GroupBoxRenderer,
     LineRenderer,
     TitleRenderer,
 )
@@ -544,3 +546,159 @@ class TestTitleRenderer:
         # Text starts at x = 1 (border) + 2 (offset) = 3
         assert canvas.get(3, 1) == "H"
         assert canvas.get(4, 1) == "i"
+
+
+class TestDashedBoxChars:
+    """Tests for DASHED_BOX_CHARS constant."""
+
+    def test_dashed_box_chars_complete(self):
+        """Test DASHED_BOX_CHARS has all required keys."""
+        required = [
+            "top_left",
+            "top_right",
+            "bottom_left",
+            "bottom_right",
+            "horizontal",
+            "vertical",
+            "shadow",
+        ]
+        for key in required:
+            assert key in DASHED_BOX_CHARS
+
+    def test_dashed_box_chars_are_single_characters(self):
+        """Test all dashed characters are single character strings."""
+        for char in DASHED_BOX_CHARS.values():
+            assert len(char) == 1
+
+    def test_dashed_horizontal_is_dashed(self):
+        """Test that horizontal character is dashed (not solid)."""
+        # The dashed horizontal is ┄ (triple dash) or ╌ (double dash)
+        assert DASHED_BOX_CHARS["horizontal"] in ("┄", "╌")
+
+    def test_dashed_vertical_is_dashed(self):
+        """Test that vertical character is dashed (not solid)."""
+        # The dashed vertical is ┆ (triple dash) or ╎ (double dash)
+        assert DASHED_BOX_CHARS["vertical"] in ("┆", "╎")
+
+
+class TestGroupBoxRenderer:
+    """Tests for GroupBoxRenderer class."""
+
+    def test_group_box_renderer_creation_default(self):
+        """Test GroupBoxRenderer creation with defaults."""
+        gbr = GroupBoxRenderer()
+        assert gbr.shadow is True
+        assert gbr.chars == DASHED_BOX_CHARS
+
+    def test_group_box_renderer_creation_no_shadow(self):
+        """Test GroupBoxRenderer creation without shadow."""
+        gbr = GroupBoxRenderer(shadow=False)
+        assert gbr.shadow is False
+
+    def test_draw_group_box_corners(self, canvas):
+        """Test drawing group box corners."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 10, 5)
+
+        # Corners should be solid (same as regular boxes for clarity)
+        assert canvas.get(0, 0) == DASHED_BOX_CHARS["top_left"]
+        assert canvas.get(9, 0) == DASHED_BOX_CHARS["top_right"]
+        assert canvas.get(0, 4) == DASHED_BOX_CHARS["bottom_left"]
+        assert canvas.get(9, 4) == DASHED_BOX_CHARS["bottom_right"]
+
+    def test_draw_group_box_dashed_borders(self, canvas):
+        """Test drawing group box with dashed borders."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 10, 5)
+
+        # Top and bottom borders should be dashed
+        assert canvas.get(1, 0) == DASHED_BOX_CHARS["horizontal"]
+        assert canvas.get(5, 0) == DASHED_BOX_CHARS["horizontal"]
+        assert canvas.get(1, 4) == DASHED_BOX_CHARS["horizontal"]
+
+    def test_draw_group_box_dashed_sides(self, canvas):
+        """Test drawing group box with dashed vertical sides."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 10, 5)
+
+        # Left and right sides should be dashed
+        assert canvas.get(0, 1) == DASHED_BOX_CHARS["vertical"]
+        assert canvas.get(0, 2) == DASHED_BOX_CHARS["vertical"]
+        assert canvas.get(9, 1) == DASHED_BOX_CHARS["vertical"]
+        assert canvas.get(9, 2) == DASHED_BOX_CHARS["vertical"]
+
+    def test_draw_group_box_with_shadow(self, canvas):
+        """Test drawing group box with shadow."""
+        gbr = GroupBoxRenderer(shadow=True)
+        gbr.draw_group_box(canvas, 0, 0, 10, 5)
+
+        # Shadow on right side
+        assert canvas.get(10, 1) == DASHED_BOX_CHARS["shadow"]
+        assert canvas.get(10, 4) == DASHED_BOX_CHARS["shadow"]
+
+        # Shadow on bottom
+        assert canvas.get(1, 5) == DASHED_BOX_CHARS["shadow"]
+        assert canvas.get(5, 5) == DASHED_BOX_CHARS["shadow"]
+
+    def test_draw_group_box_without_shadow(self, canvas):
+        """Test drawing group box without shadow."""
+        gbr = GroupBoxRenderer(shadow=False)
+        gbr.draw_group_box(canvas, 0, 0, 10, 5)
+
+        # Should not have shadow
+        assert canvas.get(10, 1) != DASHED_BOX_CHARS["shadow"]
+        assert canvas.get(1, 5) != DASHED_BOX_CHARS["shadow"]
+
+    def test_draw_group_box_with_title(self, canvas):
+        """Test drawing group box with title."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 15, 8, title="MY GROUP")
+
+        # Title should be drawn centered above the box
+        rendered = canvas.render()
+        assert "MY GROUP" in rendered
+
+        # Box should start one row below title
+        # Title is at y=0, box starts at y=1
+        assert canvas.get(0, 1) == DASHED_BOX_CHARS["top_left"]
+
+    def test_draw_group_box_title_centered(self, canvas):
+        """Test that group box title is centered."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 20, 8, title="TEST")
+
+        # Title "TEST" (4 chars) centered over width 20
+        # Center position = (20 - 4) // 2 = 8
+        assert canvas.get(8, 0) == "T"
+        assert canvas.get(9, 0) == "E"
+        assert canvas.get(10, 0) == "S"
+        assert canvas.get(11, 0) == "T"
+
+    def test_draw_group_box_at_offset(self, canvas):
+        """Test drawing group box at non-zero position."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 10, 5, 12, 6)
+
+        assert canvas.get(10, 5) == DASHED_BOX_CHARS["top_left"]
+        assert canvas.get(21, 5) == DASHED_BOX_CHARS["top_right"]
+        assert canvas.get(10, 10) == DASHED_BOX_CHARS["bottom_left"]
+        assert canvas.get(21, 10) == DASHED_BOX_CHARS["bottom_right"]
+
+    def test_draw_group_box_empty_title(self, canvas):
+        """Test drawing group box with empty title."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 10, 5, title="")
+
+        # Box should start at y=0 (no title row)
+        assert canvas.get(0, 0) == DASHED_BOX_CHARS["top_left"]
+
+    def test_draw_group_box_small_dimensions(self, canvas):
+        """Test drawing group box with minimum dimensions."""
+        gbr = GroupBoxRenderer()
+        gbr.draw_group_box(canvas, 0, 0, 3, 3)
+
+        # Should still draw corners correctly
+        assert canvas.get(0, 0) == DASHED_BOX_CHARS["top_left"]
+        assert canvas.get(2, 0) == DASHED_BOX_CHARS["top_right"]
+        assert canvas.get(0, 2) == DASHED_BOX_CHARS["bottom_left"]
+        assert canvas.get(2, 2) == DASHED_BOX_CHARS["bottom_right"]
