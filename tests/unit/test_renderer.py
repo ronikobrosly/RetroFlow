@@ -572,13 +572,13 @@ class TestDashedBoxChars:
 
     def test_dashed_horizontal_is_dashed(self):
         """Test that horizontal character is dashed (not solid)."""
-        # The dashed horizontal is ┄ (triple dash) or ╌ (double dash)
-        assert DASHED_BOX_CHARS["horizontal"] in ("┄", "╌")
+        # The dashed horizontal is ╍ (heavy double dash)
+        assert DASHED_BOX_CHARS["horizontal"] == "╍"
 
     def test_dashed_vertical_is_dashed(self):
         """Test that vertical character is dashed (not solid)."""
-        # The dashed vertical is ┆ (triple dash) or ╎ (double dash)
-        assert DASHED_BOX_CHARS["vertical"] in ("┆", "╎")
+        # The dashed vertical is ╏ (heavy double dash)
+        assert DASHED_BOX_CHARS["vertical"] == "╏"
 
 
 class TestGroupBoxRenderer:

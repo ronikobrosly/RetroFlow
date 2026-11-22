@@ -5,13 +5,13 @@ A group box is a dashed frame around some of the nodes, with a title on the
 row above it. It is only helpful when it is unmistakable which boxes it
 frames and which lines leave it, so these tests pin four promises:
 
-    ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐      1. every group is drawn, under its title, around
-    ┆                ┆░        exactly its own members
-    ┆  ┌────────┐    ┆░     2. nothing overlaps a group border, and whatever
-    ┆  │ member │──────►       is near one keeps a readable distance
-    ┆  └────────┘░   ┆░     3. a line crosses a border only when its edge
-    ┆                ┆░        really leaves or enters the group
-    └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░     4. adding groups never costs an edge, a box or
+    ┏╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓      1. every group is drawn, under its title, around
+    ╏                ╏░        exactly its own members
+    ╏  ┌────────┐    ╏░     2. nothing overlaps a group border, and whatever
+    ╏  │ member │──────►       is near one keeps a readable distance
+    ╏  └────────┘░   ╏░     3. a line crosses a border only when its edge
+    ╏                ╏░        really leaves or enters the group
+    ┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┛░     4. adding groups never costs an edge, a box or
      ░░░░░░░░░░░░░░░░░░        the look of a diagram that has no groups
 
 The first three are checked twice, by two independent readers: the checker,
@@ -139,7 +139,7 @@ def _dashed_cells(output: str) -> List[Tuple[int, int, str]]:
         (x, y, glyph)
         for y, row in enumerate(output.split("\n"))
         for x, glyph in enumerate(row)
-        if glyph in "┆┄"
+        if glyph in "╏╍"
     ]
 
 
@@ -149,7 +149,7 @@ class TestGroupBordersGlyphByGlyph:
 
     def test_no_line_runs_beside_a_dashed_border(self, rendering):
         """
-        ``│`` never sits left or right of ``┆``, ``─`` never above or below ``┄``.
+        ``│`` never sits left or right of ``╏``, ``─`` never above or below ``╍``.
 
         With a shadow, the cell after the border is the shadow, so the line
         must stay off the shadow and off the cell after it as well.
@@ -176,7 +176,7 @@ class TestGroupBordersGlyphByGlyph:
 
         offenders = []
         for x, y, glyph in _dashed_cells(report.output):
-            if glyph == "┆":
+            if glyph == "╏":
                 near = [at(x - 1, y), at(x + 1, y), at(x + 1 + shadow, y)]
                 if any(vertical(g) for g in near):
                     offenders.append((x, y))
@@ -211,7 +211,7 @@ class TestGroupBordersGlyphByGlyph:
                 rows[group.bottom][group.x],
                 rows[group.bottom][group.right],
             )
-            assert corners == ("┌", "┐", "└", "┘"), report.explain()
+            assert corners == ("┏", "┓", "┗", "┛"), report.explain()
 
 
 # ── the planner's numbers, without looking at the picture ───────────────
@@ -395,7 +395,7 @@ class TestGroupsLeaveEverythingElseAlone:
         output = FlowchartGenerator(direction=direction, **case.options).generate(
             case.text
         )
-        assert "┆" not in output and "┄" not in output
+        assert "╏" not in output and "╍" not in output
 
     @pytest.mark.parametrize("rendering", COMPLEX_GROUP_RENDERINGS, ids=rendering_id)
     def test_grouping_keeps_every_box_and_every_edge(self, rendering):

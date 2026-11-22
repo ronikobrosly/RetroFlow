@@ -112,19 +112,19 @@ FAN_EDGES = {("A", "B"), ("A", "C"), ("A", "D")}
 # cells from it on every side.
 GROUP_BASE = [
     "   Team",
-    "┌┄┄┄┄┄┄┄┄┄┐",
-    "┆         ┆",
-    "┆         ┆",
-    "┆  ┌───┐  ┆      ┌───┐",
-    "┆  │ A │  ┆      │ B │",
-    "┆  └───┘  ┆      └───┘",
-    "┆         ┆",
-    "┆         ┆",
-    "└┄┄┄┄┄┄┄┄┄┘",
+    "┏╍╍╍╍╍╍╍╍╍┓",
+    "╏         ╏",
+    "╏         ╏",
+    "╏  ┌───┐  ╏      ┌───┐",
+    "╏  │ A │  ╏      │ B │",
+    "╏  └───┘  ╏      └───┘",
+    "╏         ╏",
+    "╏         ╏",
+    "┗╍╍╍╍╍╍╍╍╍┛",
 ]
 GROUP_PASS_UNDER = [
     *GROUP_BASE[:5],
-    "┆  │ A │──┆─────►│ B │",
+    "╏  │ A │──╏─────►│ B │",
     *GROUP_BASE[6:],
 ]
 TEAM = [GroupDefinition("Team", ["A"])]
@@ -132,50 +132,50 @@ TEAM = [GroupDefinition("Team", ["A"])]
 # The same group with its shadow (one column to the right, one row below).
 GROUP_SHADOW_BASE = [
     "   Team",
-    "┌┄┄┄┄┄┄┄┄┄┐",
-    "┆         ┆░",
-    "┆         ┆░",
-    "┆  ┌───┐  ┆░     ┌───┐",
-    "┆  │ A │  ┆░     │ B │",
-    "┆  └───┘  ┆░     └───┘",
-    "┆         ┆░",
-    "┆         ┆░",
-    "└┄┄┄┄┄┄┄┄┄┘░",
+    "┏╍╍╍╍╍╍╍╍╍┓",
+    "╏         ╏░",
+    "╏         ╏░",
+    "╏  ┌───┐  ╏░     ┌───┐",
+    "╏  │ A │  ╏░     │ B │",
+    "╏  └───┘  ╏░     └───┘",
+    "╏         ╏░",
+    "╏         ╏░",
+    "┗╍╍╍╍╍╍╍╍╍┛░",
     " ░░░░░░░░░░░",
 ]
 
 # Two members, A and C, in a taller group: room for a line between them.
 PAIR_BASE = [
     "       Team",
-    "┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐",
-    "┆                 ┆",
-    "┆                 ┆",
-    "┆  ┌───┐   ┌───┐  ┆",
-    "┆  │ A │   │ C │  ┆",
-    "┆  └───┘   └───┘  ┆",
-    "┆                 ┆",
-    "┆                 ┆",
-    "┆                 ┆",
-    "└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘",
+    "┏╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓",
+    "╏                 ╏",
+    "╏                 ╏",
+    "╏  ┌───┐   ┌───┐  ╏",
+    "╏  │ A │   │ C │  ╏",
+    "╏  └───┘   └───┘  ╏",
+    "╏                 ╏",
+    "╏                 ╏",
+    "╏                 ╏",
+    "┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┛",
     "",
     "",
 ]
 # A -> C by an arc that stays inside the group.
 PAIR_ARC_INSIDE = [
     *PAIR_BASE[:6],
-    "┆  └─┬─┘   └───┘  ┆",
-    "┆    │       ▲    ┆",
-    "┆    └───────┘    ┆",
+    "╏  └─┬─┘   └───┘  ╏",
+    "╏    │       ▲    ╏",
+    "╏    └───────┘    ╏",
     *PAIR_BASE[9:],
 ]
 # The same arc, but dipping out of the group and back in.
 PAIR_ARC_OUTSIDE = [
     *PAIR_BASE[:6],
-    "┆  └─┬─┘   └───┘  ┆",
-    "┆    │       ▲    ┆",
-    "┆    │       │    ┆",
-    "┆    │       │    ┆",
-    "└┄┄┄┄│┄┄┄┄┄┄┄│┄┄┄┄┘",
+    "╏  └─┬─┘   └───┘  ╏",
+    "╏    │       ▲    ╏",
+    "╏    │       │    ╏",
+    "╏    │       │    ╏",
+    "┗╍╍╍╍│╍╍╍╍╍╍╍│╍╍╍╍┛",
     "     │       │",
     "     └───────┘",
 ]
@@ -470,15 +470,15 @@ class TestGroupBoxes:
         assert message == "box 'C' is inside group 'Team' without being a member"
 
     def test_nested_group_boxes_overlap(self):
-        base = put(put(put(PAIR_BASE, 9, 3, "┌┄┄┄┄┄┄┐"), 9, 7, "└┄┄┄┄┄┄┘"), 9, 4, "┆")
-        base = put(put(put(base, 9, 5, "┆"), 9, 6, "┆"), 16, 4, "┆")
-        base = put(put(base, 16, 5, "┆"), 16, 6, "┆")
+        base = put(put(put(PAIR_BASE, 9, 3, "┏╍╍╍╍╍╍┓"), 9, 7, "┗╍╍╍╍╍╍┛"), 9, 4, "╏")
+        base = put(put(put(base, 9, 5, "╏"), 9, 6, "╏"), 16, 4, "╏")
+        base = put(put(base, 16, 5, "╏"), 16, 6, "╏")
         report = check(base, base, set())
         assert len(report.group_boxes) == 2
         assert "overlap" in report.of("group_overlap")[0].message
 
     def test_group_box_right_after_another_groups_shadow(self):
-        left = ["┌┄┄┄┄┐", "┆    ┆░", "┆    ┆░", "└┄┄┄┄┘░", " ░░░░░░"]
+        left = ["┏╍╍╍╍┓", "╏    ╏░", "╏    ╏░", "┗╍╍╍╍┛░", " ░░░░░░"]
         base = [row.ljust(7) + other for row, other in zip(left, left)]
         report = check(base, base, set())
         assert len(report.group_boxes) == 2
@@ -489,7 +489,7 @@ class TestGroupBoxes:
     # ── group_crowded ───────────────────────────────────────────────────
 
     def test_group_boxes_side_by_side_without_a_gap(self):
-        left = ["┌┄┄┄┄┐", "┆    ┆", "┆    ┆", "└┄┄┄┄┘"]
+        left = ["┏╍╍╍╍┓", "╏    ╏", "╏    ╏", "┗╍╍╍╍┛"]
         base = [row + row for row in left]
         report = check(base, base, set())
         assert "touch" in report.of("group_crowded")[0].message
@@ -497,7 +497,7 @@ class TestGroupBoxes:
         assert check(spaced, spaced, set()).issues == []
 
     def test_member_too_close_to_the_border(self):
-        base = ["┌┄┄┄┄┄┄┄┐", "┆ ┌───┐ ┆", "┆ │ A │ ┆", "┆ └───┘ ┆", "└┄┄┄┄┄┄┄┘"]
+        base = ["┏╍╍╍╍╍╍╍┓", "╏ ┌───┐ ╏", "╏ │ A │ ╏", "╏ └───┘ ╏", "┗╍╍╍╍╍╍╍┛"]
         final = [*base, "", "┌───┐", "│ B │", "└───┘"]
         report = check(final, final, {("A", "B")})
         message = report.of("group_crowded")[0].message
@@ -507,16 +507,16 @@ class TestGroupBoxes:
 
     def test_outsider_touching_a_group_box(self):
         base = [
-            row.replace("┆      ┌", "┆┌").replace("┆      │", "┆│")
+            row.replace("╏      ┌", "╏┌").replace("╏      │", "╏│")
             for row in GROUP_BASE
         ]
-        base = [row.replace("┆      └", "┆└") for row in base]
+        base = [row.replace("╏      └", "╏└") for row in base]
         report = check(base, base, {("A", "B")}, TEAM)
         assert report.of("group_crowded")[0].message == "box 'B' touches group 'Team'"
 
     def test_outsider_shadow_touching_a_group_title(self):
         base = ["┌───┐", "│ B │░", "└───┘░", " ░░░░░ Team", *GROUP_BASE[1:4]]
-        base += ["┆  ┌───┐  ┆", "┆  │ A │  ┆", "┆  └───┘  ┆", *GROUP_BASE[7:]]
+        base += ["╏  ┌───┐  ╏", "╏  │ A │  ╏", "╏  └───┘  ╏", *GROUP_BASE[7:]]
         report = check(base, base, {("A", "B")}, TEAM)
         assert any("touches group" in i.message for i in report.of("group_crowded"))
 
@@ -561,12 +561,12 @@ class TestGroupBoxes:
 
     def test_arrowhead_right_at_a_border(self):
         base = [
-            "┌┄┄┄┄┄┄┄┐",
-            "┆       ┆",
-            "┆ ┌───┐ ┆",
-            "┆ │ A │ ┆",
-            "┆ └───┘ ┆",
-            "└┄┄┄┄┄┄┄┘",
+            "┏╍╍╍╍╍╍╍┓",
+            "╏       ╏",
+            "╏ ┌───┐ ╏",
+            "╏ │ A │ ╏",
+            "╏ └───┘ ╏",
+            "┗╍╍╍╍╍╍╍┛",
         ]
         base = [("     " + row) for row in base]
         base = put(put(put(base, 0, 2, "┌──"), 0, 3, "│B│"), 0, 4, "└──")
@@ -611,17 +611,17 @@ class TestGroupBoxes:
     def test_edge_between_outsiders_passing_through_a_group(self):
         base = [
             "               Team",
-            "          ┌┄┄┄┄┄┄┄┄┄┐",
-            "┌───┐     ┆         ┆     ┌───┐",
-            "│ X │     ┆         ┆     │ Y │",
-            "└───┘     ┆  ┌───┐  ┆     └───┘",
-            "          ┆  │ A │  ┆",
-            "          ┆  └───┘  ┆",
-            "          ┆         ┆",
-            "          ┆         ┆",
-            "          └┄┄┄┄┄┄┄┄┄┘",
+            "          ┏╍╍╍╍╍╍╍╍╍┓",
+            "┌───┐     ╏         ╏     ┌───┐",
+            "│ X │     ╏         ╏     │ Y │",
+            "└───┘     ╏  ┌───┐  ╏     └───┘",
+            "          ╏  │ A │  ╏",
+            "          ╏  └───┘  ╏",
+            "          ╏         ╏",
+            "          ╏         ╏",
+            "          ┗╍╍╍╍╍╍╍╍╍┛",
         ]
-        final = put(base, 5, 3, "─────┆─────────┆────►")
+        final = put(base, 5, 3, "─────╏─────────╏────►")
         report = check(base, final, {("X", "Y"), ("A", "A")}, TEAM)
         assert [issue.message for issue in report.of("group_crossing")] == [
             "a line passes through group 'Team'"

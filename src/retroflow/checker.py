@@ -60,12 +60,12 @@ may touch its border is a line crossing it at a right angle, and only where
 the border is straight:
 
          Title            a member keeps 2 cells from the border,
-    ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┐       a line running along the border keeps 1 blank
-    ┆             ┆░      cell from it and from its shadow,
-    ┆  ┌─────┐    ┆░      an arrowhead never touches the border,
-    ┆  │  A  │──────►     boxes and groups outside keep 1 blank cell, and
-    ┆  └─────┘░   ┆░      nothing but blank space touches the title.
-    └┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
+    ┏╍╍╍╍╍╍╍╍╍╍╍╍╍┓       a line running along the border keeps 1 blank
+    ╏             ╏░      cell from it and from its shadow,
+    ╏  ┌─────┐    ╏░      an arrowhead never touches the border,
+    ╏  │  A  │──────►     boxes and groups outside keep 1 blank cell, and
+    ╏  └─────┘░   ╏░      nothing but blank space touches the title.
+    ┗╍╍╍╍╍╍╍╍╍╍╍╍╍┛░
      ░░░░░░░░░░░░░░░
 
 A line also crosses a group border only when it has to: an edge between two
@@ -105,8 +105,9 @@ DELTA: Dict[str, Cell] = {"U": (0, -1), "D": (0, 1), "L": (-1, 0), "R": (1, 0)}
 OPPOSITE: Dict[str, str] = {"U": "D", "D": "U", "L": "R", "R": "L"}
 
 SHADOW = "░"
-DASHED_VERTICAL = "┆"
-DASHED_HORIZONTAL = "┄"
+DASHED_VERTICAL = "╏"
+DASHED_HORIZONTAL = "╍"
+GROUP_CORNERS = "┏┓┗┛"  # top-left, top-right, bottom-left, bottom-right
 
 # Which way a line must travel to enter each side of a box, and the glyph a
 # port mark on that side is allowed to use (a tee whose stem points outward).
@@ -434,12 +435,10 @@ class _Analysis:
         found: List[GroupBox] = []
         for y in range(self.height):
             for x in range(self.width):
-                if self.base[y][x] != "┌":
-                    continue
-                if self._at(self.base, (x + 1, y)) != DASHED_HORIZONTAL:
+                if self.base[y][x] != GROUP_CORNERS[0]:
                     continue
                 rect = self._trace_rectangle(
-                    x, y, DASHED_HORIZONTAL, DASHED_VERTICAL, "┐", "└", "┘"
+                    x, y, DASHED_HORIZONTAL, DASHED_VERTICAL, *GROUP_CORNERS[1:]
                 )
                 if rect:
                     shadow = self._at(self.base, (x + rect[0], y + 1)) == SHADOW
@@ -601,7 +600,7 @@ class _Analysis:
 
     def _add_group_border_passthroughs(self) -> None:
         """
-        A line may pass *under* a dashed group border (``──┆──``).
+        A line may pass *under* a dashed group border (``──╏──``).
 
         When lines on both sides reach toward an untouched border cell, treat
         that cell as part of the line so the two halves stay connected.

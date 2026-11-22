@@ -1440,12 +1440,12 @@ class RoutePlanner:
         Arcs between the members of one group are routed on their own, on
         tracks inside the group box:
 
-            ┆  └───┬────┘░            └───┬─┬──┘░  ┆░
-            ┆   ░░░│░▲░░░░             ░░░│░│░░░░  ┆░
-            ┆      │ │                    │ │      ┆░
-            ┆      │ └────────────────────┘ │      ┆░   <- inner track
-            ┆      │                        │      ┆░
-            └┄┄┄┄┄┄│┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┄┄┄┄┘░
+            ╏  └───┬────┘░            └───┬─┬──┘░  ╏░
+            ╏   ░░░│░▲░░░░             ░░░│░│░░░░  ╏░
+            ╏      │ │                    │ │      ╏░
+            ╏      │ └────────────────────┘ │      ╏░   <- inner track
+            ╏      │                        │      ╏░
+            ┗╍╍╍╍╍╍│╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍│╍╍╍╍╍╍┛░
                    │                        │           <- channel below
         """
         by_channel: Dict[int, List[Link]] = {}

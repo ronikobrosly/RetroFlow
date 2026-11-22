@@ -260,13 +260,13 @@ Other things worth knowing before changing the planner:
 - **Inner tracks**: an arc between two members of one group (and a member's self loop) is routed inside the group box, on tracks of its own between the members and the far border. `_route_channels` hands those links to a separate `route_channel` call per group (`self.inner`, reported as `RoutePlan.tracks_per_group`), so they never compete with the channel behind the group. `_group_border_after` moves the border out only when the tracks need more room than the padding gives; in LR the title reserve is worked out afterwards (`_reserve_group_titles_along_flow`). Two arcs in opposite directions between the same boxes nest instead of crossing (`_port_tie`).
 
 ```
-┆  ┌────────┐      ┌────────┐      ┌────────┐   ┆
-┆  │ Split  │─────►│  Map   │─────►│ Merge  │   ┆     D: direct lines
-┆  └────┬───┘      └────────┘      └─────┬──┘   ┆
-┆       │                              ▲ │      ┆
-┆       └──────────────────────────────┘ │      ┆  ◄─ inner track (A: arc)
-┆                                        │      ┆
-└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┄┄┄┄┘  ◄─ F: leaves through the border
+╏  ┌────────┐      ┌────────┐      ┌────────┐   ╏
+╏  │ Split  │─────►│  Map   │─────►│ Merge  │   ╏     D: direct lines
+╏  └────┬───┘      └────────┘      └─────┬──┘   ╏
+╏       │                              ▲ │      ╏
+╏       └──────────────────────────────┘ │      ╏  ◄─ inner track (A: arc)
+╏                                        │      ╏
+┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍│╍╍╍╍╍╍┛  ◄─ F: leaves through the border
                                          ▼
 ```
 
@@ -551,25 +551,25 @@ print(result)
 ### Visual Appearance
 
 Group boxes have:
-- **Dashed borders**: Using `┄` (horizontal) and `┆` (vertical) characters
-- **Solid corners**: Standard box-drawing corners (┌ ┐ └ ┘) for clarity
+- **Dashed borders**: Using `╍` (horizontal) and `╏` (vertical) characters
+- **Heavy corners**: `┏ ┓ ┗ ┛`, so a group never reads as a node box (`┌ ┐ └ ┘`)
 - **Shadows**: On right and bottom edges (same as node boxes, can be disabled)
 - **Centered title**: Displayed on the row above the group box, moved aside when a line enters the group there
 
 Example output (TB):
 ```
                 API Layer
-┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
-┆                                       ┆░
-┆                                       ┆░
-┆  ┌─────────┐             ┌────────┐   ┆░
-┆  │ Gateway │────────────►│  Auth  │░  ┆░
-┆  └─────────┘░            └────────┘░  ┆░
-┆   ░░░░░░░░░░░             ░░░░░░░░░░  ┆░
-┆                                       ┆░
-┆                                       ┆░
-┆                                       ┆░
-└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
+┏╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓
+╏                                       ╏░
+╏                                       ╏░
+╏  ┌─────────┐             ┌────────┐   ╏░
+╏  │ Gateway │────────────►│  Auth  │░  ╏░
+╏  └─────────┘░            └────────┘░  ╏░
+╏   ░░░░░░░░░░░             ░░░░░░░░░░  ╏░
+╏                                       ╏░
+╏                                       ╏░
+╏                                       ╏░
+┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┛░
  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
 

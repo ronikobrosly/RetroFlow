@@ -65,12 +65,12 @@ LINE_CHARS = {
 
 # Dashed box-drawing characters for group boxes
 DASHED_BOX_CHARS = {
-    "horizontal": "┄",  # Light triple dash horizontal
-    "vertical": "┆",  # Light triple dash vertical
-    "top_left": "┌",  # Corners remain solid for clarity
-    "top_right": "┐",
-    "bottom_left": "└",
-    "bottom_right": "┘",
+    "horizontal": "╍",  # Heavy double dash horizontal
+    "vertical": "╏",  # Heavy double dash vertical
+    "top_left": "┏",  # Heavy solid corners: set groups apart from node boxes
+    "top_right": "┓",
+    "bottom_left": "┗",
+    "bottom_right": "┛",
     "shadow": "░",
 }
 

@@ -374,7 +374,7 @@ class TestPlannedRendererOptions:
     def test_group_titles_are_drawn(self):
         output = FlowchartGenerator().generate(GROUPED)
         assert "API Layer" in output and "Data Layer" in output
-        assert "┄" in output and "┆" in output
+        assert "╍" in output and "╏" in output
 
     def test_save_txt_writes_the_planned_diagram(self, tmp_path):
         generator = FlowchartGenerator()

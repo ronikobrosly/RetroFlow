@@ -78,7 +78,7 @@ class TestPlannedRendererOnTheWholeCorpus:
 
         # Characters that are neither box text nor a known drawing glyph
         # would mean the wire grid invented something.
-        drawing = set(LINE_ARMS) | set(ARROW_HEADS) | set("░┆┄╭╮╰╯╔╗╚╝═║ ")
+        drawing = set(LINE_ARMS) | set(ARROW_HEADS) | set("░╏╍┏┓┗┛╭╮╰╯╔╗╚╝═║ ")
         text = set(case.text) | set(str(case.options.get("title", "")))
         unexpected = {ch for row in rows for ch in row} - drawing - text
         assert not unexpected, f"unexpected characters: {sorted(unexpected)}"

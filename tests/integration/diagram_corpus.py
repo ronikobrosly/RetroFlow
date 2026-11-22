@@ -25,9 +25,9 @@ text width, box width):
     cycles ─────────┤
     real-world ─────┼──► COMPLEX_CASES ──► x {TB, LR} ──► one test per concern
     options matrix ─┘
-                            ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
-    the same, in groups ──► ┆  COMPLEX_GROUP_CASES  ┆ ──► the same tests, plus
-                            └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘     test_group_diagrams.py
+                            ┏╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┓
+    the same, in groups ──► ╏  COMPLEX_GROUP_CASES  ╏ ──► the same tests, plus
+                            ┗╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍┛     test_group_diagrams.py
 
 Every case is plain RetroFlow input text plus optional generator options, so
 any failing case can be pasted straight into ``FlowchartGenerator.generate``.
