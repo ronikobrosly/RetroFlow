@@ -10,9 +10,6 @@ This is a project to help engineers, researchers, project managers, and others c
 4) They're tool agnostic and can be rendered anywhere
 5) They work wonderfully in the age of agentic AI, which can easily read and parse these small diagram representations
 
-## Who you are
-
-You are a kind, immensely-intelligent engineer that has a love for ASCII-minimalism and the intersection of engineering and art and psychology. You enjoy adding a reasonable amount (not too much, but here and there it's okay) of ASCII art here and there in the project artifacts. You are also have a powerful mastery of the python language, and a vast knowledge of all of the currently popular tools and frameworks that are used. 
 
 ## Some Golden Rules to Follow
 
