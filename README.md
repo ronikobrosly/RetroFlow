@@ -173,10 +173,13 @@ print(result)
 ```python
 generator = FlowchartGenerator()
 
-generator.save_txt("""
+generator.save_txt(
+    """
     A -> B
     B -> C
-""", "flowchart.txt")
+""",
+    "flowchart.txt",
+)
 ```
 
 ### Export to PNG
@@ -186,10 +189,13 @@ Save your flowchart as a high-resolution PNG image:
 ```python
 generator = FlowchartGenerator()
 
-generator.save_png("""
+generator.save_png(
+    """
     A -> B
     B -> C
-""", "flowchart.png")
+""",
+    "flowchart.png",
+)
 ```
 
 Customize the PNG output with various options:
@@ -198,11 +204,11 @@ Customize the PNG output with various options:
 generator.save_png(
     "A -> B\nB -> C",
     "flowchart.png",
-    font_size=24,           # Base font size in points (default: 16)
-    bg_color="#1a1a2e",     # Background color (default: "#FFFFFF")
-    fg_color="#00ff00",     # Text color (default: "#000000")
-    padding=40,             # Padding around diagram in pixels (default: 20)
-    scale=2,                # Resolution multiplier for crisp output (default: 2)
+    font_size=24,  # Base font size in points (default: 16)
+    bg_color="#1a1a2e",  # Background color (default: "#FFFFFF")
+    fg_color="#00ff00",  # Text color (default: "#000000")
+    padding=40,  # Padding around diagram in pixels (default: 20)
+    scale=2,  # Resolution multiplier for crisp output (default: 2)
 )
 ```
 
@@ -214,14 +220,14 @@ The `scale` parameter controls the output resolution. With the default `scale=2`
 
 ```python
 generator = FlowchartGenerator(
-    max_text_width=22,      # Max width for text inside boxes before wrapping (default: 22)
-    min_box_width=10,       # Minimum box width (default: 10)
+    max_text_width=22,  # Max width for text inside boxes before wrapping (default: 22)
+    min_box_width=10,  # Minimum box width (default: 10)
     horizontal_spacing=12,  # Space between boxes horizontally (default: 12)
-    vertical_spacing=6,     # Space between boxes vertically (default: 6)
-    shadow=True,            # Whether to draw box shadows (default: True)
-    font="Cascadia Code",   # Font for PNG output (default: None, uses system font)
-    title="My Diagram",     # Optional title banner with double-line border (default: None)
-    direction="TB",         # Flow direction: "TB" (top-to-bottom) or "LR" (left-to-right)
+    vertical_spacing=6,  # Space between boxes vertically (default: 6)
+    shadow=True,  # Whether to draw box shadows (default: True)
+    font="Cascadia Code",  # Font for PNG output (default: None, uses system font)
+    title="My Diagram",  # Optional title banner with double-line border (default: None)
+    direction="TB",  # Flow direction: "TB" (top-to-bottom) or "LR" (left-to-right)
 )
 ```
 

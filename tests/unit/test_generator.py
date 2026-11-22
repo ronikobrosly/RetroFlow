@@ -445,6 +445,20 @@ class TestFlowchartGeneratorSavePng:
             if os.path.exists(filename):
                 os.remove(filename)
 
+    def test_save_png_font_argument_overrides_instance_font(
+        self, simple_input, monkeypatch
+    ):
+        """Test that a per-call font overrides the instance font."""
+        gen = FlowchartGenerator(font="Cascadia Code")
+        calls = []
+        monkeypatch.setattr(
+            gen.exporter, "save_png", lambda *args, **kwargs: calls.append(kwargs)
+        )
+
+        gen.save_png(simple_input, "flowchart.png", font="Monaco")
+
+        assert calls[0]["font"] == "Monaco"
+
     def test_save_png_overwrites_existing(self, generator, simple_input):
         """Test that save_png overwrites existing file."""
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
