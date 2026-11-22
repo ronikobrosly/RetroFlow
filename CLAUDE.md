@@ -90,7 +90,7 @@ The `publish.yml` workflow will automatically:
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
 - **Title banners**: Optional double-line bordered titles with automatic word wrapping (at ~15 chars)
 - **Horizontal flow**: Left-to-right layout mode (`direction="LR"`) for compact diagrams
-- **Group boxes**: Visually cluster related nodes within dashed-border containers with titles
+- **Group boxes**: Visually cluster related nodes within dashed-border containers with titles; borders keep a buffer from boxes, lines and titles, and edges between members stay inside their group
 
 
 ## Project Structure
@@ -122,17 +122,20 @@ retroflow/
 │   ├── conftest.py          # Shared pytest fixtures
 │   ├── unit/                # One module per source module
 │   └── integration/
-│       ├── diagram_corpus.py            # Simple, complex and random diagrams
+│       ├── diagram_corpus.py            # Simple, complex and random diagrams,
+│       │                                #   each with and without group boxes
 │       ├── diagram_checker.py           # check_diagram / check_planned_diagram
 │       ├── diagram_scorecard.py         # Clean/defect summary for the corpus
 │       ├── golden/                      # Pinned output of the simple diagrams
 │       ├── test_simple_diagram_goldens.py
 │       ├── test_complex_diagrams.py     # Complex diagrams via generate()
+│       ├── test_group_diagrams.py       # Group boxes: borders, buffers, titles + fuzzing
 │       ├── test_planned_renderer.py     # Planned renderer on its own + fuzzing
 │       └── test_diagram_checker.py      # The checker, on hand-drawn pictures
 ├── manual_tests/
 │   ├── render_corpus.py     # Writes every simple + complex diagram to .txt
-│   └── output/              # Generated files (gitignored)
+│   └── output/              # Generated files (gitignored): simple/, complex/,
+│                            #   groups_simple/, groups_complex/
 ├── codecov.yml              # Coverage threshold config (90%)
 ├── pyproject.toml           # Package metadata and dependencies
 ├── README.md                # User documentation
@@ -154,7 +157,7 @@ retroflow/
 | `route_planner.py` | `RoutePlanner` plans a whole diagram as data (`RoutePlan`): layers, lanes, order, ports, hooks, positions, tracks, wires. Also `assign_ranks`, `spread_offsets`, `settle` |
 | `channel_router.py` | `route_channel` gives every connection in one gap its own track; splits pieces with a jog when ordering rules contradict |
 | `wire_grid.py` | `WireGrid` stores arms per cell per net and looks glyphs up from them; reports conflicts instead of drawing misleading junctions |
-| `checker.py` | `analyze_rendering` reads a finished picture back into edges and reports `Issue`s (`DiagramReport`) |
+| `checker.py` | `analyze_rendering` reads a finished picture back into edges and group boxes and reports `Issue`s (`DiagramReport`) |
 | `export.py` | `FlowchartExporter` class for PNG and text file export with font handling |
 | `tracer.py` | Debug tracing infrastructure - `RenderTrace`, `PipelineStage`, `CharacterPlacement` for capturing rendering decisions |
 | `debug.py` | Debug utilities - `TracedCanvas` wrapper, `visual_diff`, `CanvasInspector` for debugging and analysis |
@@ -164,7 +167,7 @@ retroflow/
 
 ```
 input ──► classic renderer ──► checker: clean? ── yes ──► returned unchanged
-                                      │ no
+                                      │ no, or the diagram has group boxes
                                       ▼
           planned renderer ──► checker: better than classic? ──► returned
 ```
@@ -183,6 +186,15 @@ picture is used when it checks out better: fewer errors, then fewer warnings.
 A crash inside the planner also falls back to the classic picture.
 `generator.last_renderer` is `"classic"` or `"planned"` after each call.
 
+**Diagrams with group boxes always go on to the planned renderer**, even when
+the classic picture reads back clean, and the planned picture also wins a tie.
+Only the planner routes edges with the group borders in mind (edges between
+members stay inside, lines cross a border once and at a right angle); the
+classic renderer draws groups around a finished layout, which is correct but
+takes detours and passes under borders. The classic picture remains the
+fallback when the planner crashes or checks out worse. Diagrams without
+groups are not affected by any of this.
+
 ### The checker (`checker.py`)
 
 The checker compares the canvas after boxes were drawn with the finished
@@ -196,7 +208,17 @@ renderer internals.
 | `stray_line`, `dangling_line`, `dangling_port` | A line without a source or arrowhead, or an arm reaching toward nothing |
 | `floating_arrow`, `arrow_no_tail`, `arrow_hit_sideways` | Arrowhead defects |
 | `box_missing`, `box_damaged`, `group_border_damaged` | Boxes, titles or group borders overwritten |
+| `group_missing` | A group from the input has no dashed box around all its members, or no title above that box |
+| `group_overlap` | A group box overlaps another group box, or frames a box that is not a member |
 | `adjacent_lines` (warning) | Unrelated vertical strokes in touching columns |
+| `group_crowded` (warning) | Something is too close to a group: a member nearer than `GROUP_MEMBER_CLEARANCE` (2) to its border; another box, group, parallel line or arrowhead nearer than `GROUP_CLEARANCE` (1) to a border, shadow or title |
+| `group_crossing` (warning) | A needless border crossing: a line between two members leaves the group, or a line between two outsiders passes through it |
+
+Group boxes are found in the picture itself (dashed rectangles in the
+boxes-only canvas), then matched to the groups of the input when
+`analyze_rendering(..., groups=...)` is given them. A line may cross a dashed
+border at a right angle (drawn over it or passing under it); that is the only
+contact between lines and group boxes the checker accepts.
 
 ### The planned renderer (`route_planner.py`)
 
@@ -235,6 +257,18 @@ Other things worth knowing before changing the planner:
 - **Channels** (`channel_router.route_channel`): pieces whose spans overlap get different tracks; a stub above another piece's stub forces their order; contradictory orders are broken by splitting a piece with a jog; remaining freedom goes to the order with fewer crossings. A same-net four-way meeting is split into two tees, because `┼` must always mean "crossing".
 - **Gaps keep their classic size** when their tracks fit and grow only for extra tracks (`_assign_flow_positions`), so planned diagrams look like classic ones where nothing is contested.
 - **Groups**: all members of a group share a layer (`assign_ranks` collapses groups first) and stay contiguous. Grouped boxes only use `F`, `A` and `D`. In TB the title is placed beside the lines entering the group from above (`_group_title_start`), and the group is widened if no gap is long enough.
+- **Inner tracks**: an arc between two members of one group (and a member's self loop) is routed inside the group box, on tracks of its own between the members and the far border. `_route_channels` hands those links to a separate `route_channel` call per group (`self.inner`, reported as `RoutePlan.tracks_per_group`), so they never compete with the channel behind the group. `_group_border_after` moves the border out only when the tracks need more room than the padding gives; in LR the title reserve is worked out afterwards (`_reserve_group_titles_along_flow`). Two arcs in opposite directions between the same boxes nest instead of crossing (`_port_tie`).
+
+```
+┆  ┌────────┐      ┌────────┐      ┌────────┐   ┆
+┆  │ Split  │─────►│  Map   │─────►│ Merge  │   ┆     D: direct lines
+┆  └────┬───┘      └────────┘      └─────┬──┘   ┆
+┆       │                              ▲ │      ┆
+┆       └──────────────────────────────┘ │      ┆  ◄─ inner track (A: arc)
+┆                                        │      ┆
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┄┄┄┄┘  ◄─ F: leaves through the border
+                                         ▼
+```
 
 ### Debugging a diagram
 
@@ -246,24 +280,28 @@ uv run python tests/integration/diagram_scorecard.py cicd-TB # one diagram + iss
 To look at the pictures themselves, render the corpus to text files:
 
 ```bash
-uv run python manual_tests/render_corpus.py              # all simple + complex
-uv run python manual_tests/render_corpus.py cicd groups  # names containing either
+uv run python manual_tests/render_corpus.py                 # everything
+uv run python manual_tests/render_corpus.py cicd tier       # names containing either
+uv run python manual_tests/render_corpus.py groups_simple/  # one whole folder
 ```
 
-Files land in `manual_tests/output/simple/` and `manual_tests/output/complex/`,
-one per diagram and direction (`<case>-<direction>.txt`). Each one starts with a
-header (case, direction, options, which renderer won, the input text) followed
-by the diagram exactly as `generate()` returns it. An unfiltered run deletes the
-old files first. The output folder is gitignored; the script has a smoke test
-in `tests/integration/test_manual_render_script.py`.
+Files land in four folders under `manual_tests/output/`: `simple/` and
+`complex/` for diagrams without groups, `groups_simple/` and `groups_complex/`
+for diagrams with group boxes; one file per diagram and direction
+(`<case>-<direction>.txt`). Each one starts with a header (case, direction,
+options, which renderer won, what the checker found, the input text) followed
+by the diagram exactly as `generate()` returns it. A filter is matched against
+`<folder>/<case>-<direction>`. An unfiltered run deletes the old files first.
+The output folder is gitignored; the script has smoke tests in
+`tests/integration/test_manual_render_script.py`.
 
 ```python
 generator = FlowchartGenerator(direction="LR")
 generator.generate(text, debug=True)
-generator.last_renderer                      # which renderer won
+generator.last_renderer  # which renderer won
 trace = generator.get_trace()
-trace.get_stage("renderer_selected").data    # issues of both renderers
-trace.get_stage("routes_planned").data       # layers, tracks per channel, conflicts
+trace.get_stage("renderer_selected").data  # issues of both renderers
+trace.get_stage("routes_planned").data  # layers, tracks per channel/group, conflicts
 
 # Force the planned renderer, bypassing the gate (tests do this):
 parsed = generator.parser.parse_with_groups(text)
@@ -276,9 +314,11 @@ and `check_planned_diagram` (planned renderer only); both return a
 
 ### Tests for diagrams
 
-- `diagram_corpus.py` holds every diagram: `SIMPLE_CASES` (pinned by goldens), `COMPLEX_CASES` (graph families, cycles, real-world diagrams, an options matrix, groups) and `RANDOM_CASES` (seeded, some with random options and groups). Every case runs in TB and LR. **Add new shapes here**; all test modules pick them up.
-- A new diagram that must stay byte-identical goes in `SIMPLE_CASES`; regenerate with `RETROFLOW_UPDATE_GOLDENS=1 uv run pytest -k goldens` and review the diff.
+- `diagram_corpus.py` holds every diagram, in two parallel sets of lists. Without groups: `SIMPLE_CASES` (pinned by goldens), `COMPLEX_CASES` (graph families, cycles, real-world diagrams, an options matrix) and `RANDOM_CASES` (seeded, some with random options). With groups: `SIMPLE_GROUP_CASES` (pinned by goldens too), `COMPLEX_GROUP_CASES` (group shapes, the real-world diagrams with their subsystems grouped, an options matrix) and `RANDOM_GROUP_CASES`; `GROUP_CASES` is all three. Every case runs in TB and LR. **Add new shapes here**; all test modules pick them up.
+- A new diagram that must stay byte-identical goes in `SIMPLE_CASES` or `SIMPLE_GROUP_CASES`; regenerate with `RETROFLOW_UPDATE_GOLDENS=1 uv run pytest -k goldens` and review the diff.
+- `test_group_diagrams.py` checks group boxes three ways: by reading the picture (the checker's group codes), glyph by glyph (nothing beside a dashed border, title printed once with blanks around it), and in the plan (`GroupBoundary` geometry, wires on borders only at right angles, inner tracks). It also fuzzes 250 seeded grouped diagrams with random options.
 - `test_planned_renderer.py` also fuzzes the planner with 300 seeded random graphs, groups and option sets. Use only `Random.random()` in generators so a seed means the same diagram on every Python version.
+- The parser drops group members that appear in no edge, so a test diagram whose group looks too small probably names a node that has no edge.
 
 
 ## Debug Tracing System
@@ -360,7 +400,7 @@ The trace captures these stages:
 | `boxes_drawn` | All node boxes rendered |
 | `forward_edges_drawn` | Forward edges rendered (normal flow; classic renderer) |
 | `back_edges_drawn` | Back edges rendered (cycles; classic renderer) |
-| `routes_planned` | Layers, tracks per channel, crossings and wire conflicts (planned renderer) |
+| `routes_planned` | Layers, tracks per channel and per group, crossings and wire conflicts (planned renderer) |
 | `edges_drawn` | All wires painted (planned renderer) |
 | `renderer_selected` | Which renderer's picture was returned, and the checker's issue counts for both |
 
@@ -514,26 +554,35 @@ Group boxes have:
 - **Dashed borders**: Using `┄` (horizontal) and `┆` (vertical) characters
 - **Solid corners**: Standard box-drawing corners (┌ ┐ └ ┘) for clarity
 - **Shadows**: On right and bottom edges (same as node boxes, can be disabled)
-- **Centered title**: Displayed above the group box
+- **Centered title**: Displayed on the row above the group box, moved aside when a line enters the group there
 
-Example output:
+Example output (TB):
 ```
-     API LAYER
-┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
-┆                   ┆░
-┆  ┌───────────┐    ┆░
-┆  │  Gateway  │░   ┆░
-┆  └───────────┘░   ┆░
-┆    ░░░░░░░░░░░░   ┆░
-┆        │          ┆░
-┆        ▼          ┆░
-┆  ┌───────────┐    ┆░
-┆  │   Auth    │░   ┆░
-┆  └───────────┘░   ┆░
-┆    ░░░░░░░░░░░░   ┆░
-└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
- ░░░░░░░░░░░░░░░░░░░░░
+                API Layer
+┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+┆                                       ┆░
+┆                                       ┆░
+┆  ┌─────────┐             ┌────────┐   ┆░
+┆  │ Gateway │────────────►│  Auth  │░  ┆░
+┆  └─────────┘░            └────────┘░  ┆░
+┆   ░░░░░░░░░░░             ░░░░░░░░░░  ┆░
+┆                                       ┆░
+┆                                       ┆░
+┆                                       ┆░
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
+ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ```
+
+### Borders and Buffers
+
+What a grouped picture must look like; the checker enforces every line of this
+on every corpus diagram and on the fuzzed ones:
+
+- A group box frames all of its members and nothing else, under its own title.
+- Group boxes never overlap, and never touch each other or an outside box.
+- A member keeps at least two blank cells from its border (its shadow included).
+- No line runs along a border, a group shadow or a title, and no arrowhead sits right at a border. Lines cross a border once, at a right angle.
+- Edges between members of one group stay inside the box (direct lines between neighbours, arcs on inner tracks otherwise); edges between outsiders never cut through a group.
 
 ### Layout Behavior
 
@@ -547,7 +596,7 @@ Nodes are arranged **perpendicular to the flow direction** within groups, making
 ### Validation Rules
 
 - A node can belong to **at most one group** (enforced during parsing)
-- All group members must exist in at least one edge definition
+- Group members are matched against the nodes found in edges; a name that appears in no edge is dropped, and a group with no known member at all is a `ParseError`
 - Group definitions must appear before edge definitions in the input
 
 ### Data Models
@@ -566,5 +615,6 @@ Nodes are arranged **perpendicular to the flow direction** within groups, making
 | `positioning.py` | `calculate_group_aware_positions()`, `calculate_group_boundaries()`, `resolve_group_overlaps()` |
 | `renderer.py` | `GroupBoxRenderer` class, `DASHED_BOX_CHARS` constants |
 | `generator.py` | Group orchestration in `_render_classic()` / `_render_planned()`, `_draw_groups()` method |
-| `route_planner.py` | Planned renderer: `assign_ranks()` (groups share a layer), group extents, title placement, direct lines and arcs inside groups |
+| `route_planner.py` | Planned renderer: `assign_ranks()` (groups share a layer), group extents, title placement, direct lines and arcs on inner tracks inside groups |
+| `checker.py` | Finds group boxes and titles in the picture; `group_missing`, `group_overlap`, `group_crowded`, `group_crossing`, `group_border_damaged` |
 | `models.py` | `GroupDefinition`, `GroupBoundary` dataclasses |

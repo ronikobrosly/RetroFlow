@@ -214,6 +214,10 @@ class FlowchartGenerator:
             planned renderer routes all edges together instead. After the
             call, ``last_renderer`` says which one was used.
 
+            Diagrams with group boxes always go on to the planned renderer,
+            because only it routes edges with the group borders in mind; the
+            classic picture is kept as the fallback.
+
         Debug Mode:
             When debug=True, a detailed trace is captured that includes:
             - Pipeline stages (parse, layout, positions, etc.)
@@ -246,13 +250,18 @@ class FlowchartGenerator:
             return RenderTrace(input_text=input_text, direction=self.direction)
 
         # The classic renderer goes first. Whatever it draws cleanly is
-        # returned exactly as it always was.
+        # returned exactly as it always was, unless the diagram has groups:
+        # the classic renderer knows nothing about group borders, so its
+        # picture is then only the fallback for the planned one.
+        grouped = bool(parse_result.groups)
         classic_trace = new_trace()
         classic_output, classic_base = self._render_classic(
             parse_result, effective_title, classic_trace
         )
-        classic_report = analyze_rendering(classic_base, classic_output, expected_edges)
-        if not classic_report.issues:
+        classic_report = analyze_rendering(
+            classic_base, classic_output, expected_edges, parse_result.groups
+        )
+        if not classic_report.issues and not grouped:
             return self._finish_generate(
                 "classic", classic_output, classic_trace, classic_report, None
             )
@@ -275,12 +284,17 @@ class FlowchartGenerator:
                 None,
                 planner_error=f"{type(error).__name__}: {error}",
             )
-        planned_report = analyze_rendering(planned_base, planned_output, expected_edges)
+        planned_report = analyze_rendering(
+            planned_base, planned_output, expected_edges, parse_result.groups
+        )
 
         def badness(report: DiagramReport) -> Tuple[int, int]:
             return (len(report.errors), len(report.warnings))
 
-        if badness(planned_report) < badness(classic_report):
+        planned_wins = badness(planned_report) < badness(classic_report) or (
+            grouped and badness(planned_report) == badness(classic_report)
+        )
+        if planned_wins:
             return self._finish_generate(
                 "planned", planned_output, planned_trace, planned_report, classic_report
             )
@@ -773,6 +787,7 @@ class FlowchartGenerator:
                 {
                     "layers": plan.layers,
                     "tracks_per_channel": plan.tracks_per_channel,
+                    "tracks_per_group": plan.tracks_per_group,
                     "crossings": plan.grid.crossing_count(),
                     "conflicts": [str(c) for c in plan.grid.conflicts],
                 },

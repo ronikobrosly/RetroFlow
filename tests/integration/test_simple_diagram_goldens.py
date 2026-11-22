@@ -10,6 +10,9 @@ These are the guard rail for any work on complex-diagram routing: a routing
 change may make busy diagrams cleaner, but it must not move a single
 character of these.
 
+The small diagrams with group boxes (``SIMPLE_GROUP_CASES``) are pinned the
+same way, so the look of a group box cannot drift either.
+
 If a golden really should change, regenerate deliberately and review the diff:
 
     RETROFLOW_UPDATE_GOLDENS=1 uv run pytest -k goldens
@@ -24,12 +27,17 @@ import pytest
 from retroflow import FlowchartGenerator
 
 from .diagram_checker import check_diagram
-from .diagram_corpus import SIMPLE_CASES, rendering_id, renderings
+from .diagram_corpus import (
+    SIMPLE_CASES,
+    SIMPLE_GROUP_CASES,
+    rendering_id,
+    renderings,
+)
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 UPDATE_GOLDENS = os.environ.get("RETROFLOW_UPDATE_GOLDENS") == "1"
 
-SIMPLE_RENDERINGS = renderings(SIMPLE_CASES)
+SIMPLE_RENDERINGS = renderings(SIMPLE_CASES + SIMPLE_GROUP_CASES)
 
 
 @pytest.mark.parametrize("rendering", SIMPLE_RENDERINGS, ids=rendering_id)

@@ -29,13 +29,15 @@ from .diagram_checker import (
 )
 from .diagram_corpus import (
     COMPLEX_CASES,
+    COMPLEX_GROUP_CASES,
+    GROUP_CASES,
     RANDOM_CASES,
     SIMPLE_CASES,
     rendering_id,
     renderings,
 )
 
-ALL_CASES = SIMPLE_CASES + COMPLEX_CASES + RANDOM_CASES
+ALL_CASES = SIMPLE_CASES + COMPLEX_CASES + RANDOM_CASES + GROUP_CASES
 ALL_RENDERINGS = renderings(ALL_CASES)
 CROSSING_FREE_RENDERINGS = renderings(c for c in ALL_CASES if c.crossing_free)
 SIMPLE_RENDERINGS = renderings(SIMPLE_CASES)
@@ -61,10 +63,11 @@ class TestPlannedRendererOnTheWholeCorpus:
         assert not report.errors, report.explain(*codes)
 
     def test_picture_is_legible(self, rendering):
-        """Unrelated vertical strokes never sit in touching columns."""
+        """No cramped strokes, and nothing crowding or needlessly crossing a group."""
         case, direction = rendering
         report = _planned(case.name, direction)
-        assert not report.warnings, report.explain("adjacent_lines")
+        codes = sorted({issue.code for issue in report.warnings})
+        assert not report.warnings, report.explain(*codes)
 
     def test_text_is_tidy(self, rendering):
         """No trailing blanks, no blank tail, only glyphs the renderer owns."""
@@ -128,7 +131,7 @@ class TestArrowheads:
 
     @pytest.mark.parametrize(
         "case",
-        [c for c in COMPLEX_CASES if "TB" in c.directions],
+        [c for c in COMPLEX_CASES + COMPLEX_GROUP_CASES if "TB" in c.directions],
         ids=lambda case: case.name,
     )
     def test_tb_gives_every_edge_its_own_arrowhead(self, case):
@@ -137,7 +140,7 @@ class TestArrowheads:
 
     @pytest.mark.parametrize(
         "case",
-        [c for c in COMPLEX_CASES if "LR" in c.directions],
+        [c for c in COMPLEX_CASES + COMPLEX_GROUP_CASES if "LR" in c.directions],
         ids=lambda case: case.name,
     )
     def test_lr_never_draws_more_arrowheads_than_edges(self, case):

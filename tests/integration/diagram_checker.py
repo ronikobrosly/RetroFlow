@@ -20,9 +20,11 @@ from retroflow.checker import (  # noqa: F401  (re-exported for the tests)
     WARNING_CODES,
     Box,
     DiagramReport,
+    GroupBox,
     Issue,
     analyze_rendering,
     expected_edges_of,
+    expected_groups_of,
     normalize_name,
 )
 
@@ -46,7 +48,9 @@ def check_diagram(
     output = generator.generate(input_text, debug=True)
     base = generator.get_trace().get_canvas_at_stage("boxes_drawn") or []
 
-    report = analyze_rendering(base, output, expected_edges_of(input_text))
+    report = analyze_rendering(
+        base, output, expected_edges_of(input_text), expected_groups_of(input_text)
+    )
     report.label = label or f"{direction} diagram"
 
     plain = FlowchartGenerator(direction=direction, **generator_kwargs).generate(
@@ -84,6 +88,8 @@ def check_planned_diagram(
     parsed = generator.parser.parse_with_groups(input_text)
     output, base = generator._render_planned(parsed, generator.title, None)
 
-    report = analyze_rendering(base, output, expected_edges_of(input_text))
+    report = analyze_rendering(
+        base, output, expected_edges_of(input_text), expected_groups_of(input_text)
+    )
     report.label = label or f"{direction} diagram (planned)"
     return report

@@ -83,6 +83,8 @@ class RoutePlan:
         height: Rows needed to draw everything.
         layers: Node names per layer, in drawing order.
         tracks_per_channel: Tracks used in each gap, upstream gap first.
+        tracks_per_group: Tracks used inside each group box by the edges
+            between its own members (groups without such edges are absent).
     """
 
     box_dimensions: Dict[str, BoxDimensions]
@@ -95,6 +97,7 @@ class RoutePlan:
     height: int
     layers: List[List[str]]
     tracks_per_channel: List[int]
+    tracks_per_group: Dict[str, int] = field(default_factory=dict)
 
 
 # ── internal model ──────────────────────────────────────────────────────
@@ -198,6 +201,7 @@ class _PendingLink:
     first_upstream: bool
     second: object
     second_upstream: bool
+    group: Optional[str] = None  # routed inside this group's box, not the channel
 
 
 @dataclass(frozen=True)
@@ -479,6 +483,7 @@ class RoutePlanner:
         self._assign_cross_positions()
         self._straighten_ports()
         self._route_channels()
+        self._reserve_group_titles_along_flow()
         self._assign_flow_positions()
         return self._assemble()
 
@@ -641,6 +646,18 @@ class RoutePlanner:
             _PendingLink(channel, edge, first, first_up, second, second_up)
         )
 
+    def _link_arc(self, edge: _Edge) -> None:
+        """
+        An arc: out of the downstream side of a box and back into that side.
+
+        Between two members of one group (or from a member to itself) the
+        arc is routed inside the group box, so that a line crossing a group
+        border always means "this edge leaves the group".
+        """
+        self._link(edge.src.rank, edge, "S", True, "T", True)
+        if edge.src.group and edge.src.group == edge.dst.group:
+            self.links[-1].group = edge.src.group
+
     def _build_lanes(self) -> None:
         """
         Give every edge a lane in each layer it has to travel past.
@@ -658,7 +675,7 @@ class RoutePlanner:
             elif edge.kind == "back" or (edge.kind == "self" and edge.dst_mode != "A"):
                 self._build_backward(edge, a, b)
             elif edge.kind == "self":
-                self._link(a, edge, "S", True, "T", True)
+                self._link_arc(edge)
             # Peers get no lanes; they are settled once the order is known.
         self._choose_lane_sides()
 
@@ -958,7 +975,7 @@ class RoutePlanner:
                 edge.src_mode = edge.dst_mode = "D"
             else:
                 edge.dst_mode = "A"
-                self._link(src.rank, edge, "S", True, "T", True)
+                self._link_arc(edge)
 
     # ── step 6: ports on the flow-facing sides ──────────────────────────
 
@@ -981,7 +998,7 @@ class RoutePlanner:
             port.sort_key = (
                 sum(k[0] for k in keys) / len(keys),
                 sum(k[1] for k in keys) / len(keys),
-                port.edges[0].index,
+                self._port_tie(port),
             )
 
         m = self.m
@@ -1054,6 +1071,30 @@ class RoutePlanner:
             return (1.5, 0.0 if port.role == "exit" else 1.0)
         return (0.0 if other.order < box.order else 2.0, -float(other.order))
 
+    def _port_tie(self, port: _Port) -> int:
+        """
+        Order of two ports whose lines lead to the same place.
+
+        Normally the edge written first comes first. Two arcs between the
+        same pair of boxes (one each way) are the exception: the order is
+        mirrored at the right-hand box, so one arc nests inside the other
+        instead of crossing it.
+
+            A ──┐ ┌──► A        becomes        A ──┐ ┌──► A
+                └─┼──┐                             │ └──┐
+                  └──┼──► B                        └────┼──► B   (no ┼)
+        """
+        edge = port.edges[0]
+        other = self._other_end(port, edge)
+        box = port.box
+        arc_from_the_left = (
+            not other.is_lane
+            and other is not box
+            and other.rank == box.rank
+            and other.order < box.order
+        )
+        return -edge.index if arc_from_the_left else edge.index
+
     def _other_end(self, port: _Port, edge: _Edge):
         """The item a port's line reaches first inside its channel."""
         here = "S" if port is edge.src_port else "T"
@@ -1121,7 +1162,10 @@ class RoutePlanner:
 
         A title sits on its own row above the group box. In TB the lines
         entering the group from above cross that row, so the title must fit
-        beside them; a group that is too narrow for that is widened.
+        beside them; a group that is too narrow for that is widened. In LR
+        the title only needs the box to be as long as itself, and how long
+        the box is depends on the lines inside it, so that is settled later
+        (``_reserve_group_titles_along_flow``).
         """
         m = self.m
         for group in self.groups:
@@ -1130,10 +1174,7 @@ class RoutePlanner:
                 continue
             title = len(group.name)
             if not m.tb:
-                widest = max(box.flow_size for box in members)
-                natural = widest + m.pad_flow + 2 * GROUP_PADDING
-                extra = max(0, title + 2 - natural)
-                self.title_reserve[group.name] = (extra // 2, extra - extra // 2)
+                self.title_reserve[group.name] = (0, 0)
                 continue
 
             # Lay the members out at their tightest and look for a free slot.
@@ -1151,6 +1192,17 @@ class RoutePlanner:
             if self._title_slot(left - before, right + after, title, blocked) is None:
                 after = max(after, max(blocked) + 2 + title - right)
             self.title_reserve[group.name] = (before, after)
+
+    def _reserve_group_titles_along_flow(self) -> None:
+        """LR: lengthen every group box that is shorter than its title."""
+        if self.m.tb:
+            return
+        for group in self.groups:
+            if not self._has(group):
+                continue
+            natural = GROUP_PADDING + self._group_border_after(group.name) + 1
+            extra = max(0, len(group.name) + 2 - natural)
+            self.title_reserve[group.name] = (extra // 2, extra - extra // 2)
 
     def _has(self, group: GroupDefinition) -> bool:
         return any(box.group == group.name for box in self.boxes.values())
@@ -1382,21 +1434,41 @@ class RoutePlanner:
     # ── step 9: tracks in the channels ──────────────────────────────────
 
     def _route_channels(self) -> None:
-        """Route every gap between layers (and the two outer margins)."""
+        """
+        Route every gap between layers (and the two outer margins).
+
+        Arcs between the members of one group are routed on their own, on
+        tracks inside the group box:
+
+            ┆  └───┬────┘░            └───┬─┬──┘░  ┆░
+            ┆   ░░░│░▲░░░░             ░░░│░│░░░░  ┆░
+            ┆      │ │                    │ │      ┆░
+            ┆      │ └────────────────────┘ │      ┆░   <- inner track
+            ┆      │                        │      ┆░
+            └┄┄┄┄┄┄│┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┄┄┄┄┘░
+                   │                        │           <- channel below
+        """
         by_channel: Dict[int, List[Link]] = {}
+        by_group: Dict[str, List[Link]] = {}
         for link in self.links:
             first = self._resolve(link.edge, link.first)
             second = self._resolve(link.edge, link.second)
-            by_channel.setdefault(link.channel, []).append(
-                Link(
-                    link.edge.net,
-                    Terminal(first, self._position_of(first), link.first_upstream),
-                    Terminal(second, self._position_of(second), link.second_upstream),
-                )
+            routed = Link(
+                link.edge.net,
+                Terminal(first, self._position_of(first), link.first_upstream),
+                Terminal(second, self._position_of(second), link.second_upstream),
             )
+            if link.group:
+                by_group.setdefault(link.group, []).append(routed)
+            else:
+                by_channel.setdefault(link.channel, []).append(routed)
         self.channels: Dict[int, ChannelPlan] = {
             channel: route_channel(links, self.m.stroke_gap)
             for channel, links in sorted(by_channel.items())
+        }
+        self.inner: Dict[str, ChannelPlan] = {
+            name: route_channel(links, self.m.stroke_gap)
+            for name, links in by_group.items()
         }
 
     # ── step 10: positions along the flow ───────────────────────────────
@@ -1417,12 +1489,34 @@ class RoutePlanner:
             reserved = max(reserved, extent + 1)
         return reserved
 
+    def _group_body(self, name: str) -> int:
+        """Size along the flow of a group's longest member."""
+        return max(box.flow_size for box in self._group_members(name))
+
+    def _inner_track_offset(self, name: str, level: int) -> int:
+        """
+        Offset from the layer start to one of a group's inner tracks.
+
+        The first track leaves one cell of line between itself and the
+        arrowheads of the arcs it carries (they sit right outside the boxes).
+        """
+        return self._group_body(name) + 2 + level * self.m.track_pitch
+
     def _group_border_after(self, name: str) -> int:
-        """Offset from the layer start to a group's downstream border."""
+        """
+        Offset from the layer start to a group's downstream border.
+
+        The border keeps its usual distance from the boxes and moves out
+        only when the tracks inside the group need more room: one blank cell
+        always remains between the last track and the border.
+        """
         m = self.m
-        body = max(box.flow_size for box in self._group_members(name))
+        after = self._group_body(name) + m.pad_flow + 2
+        plan = self.inner.get(name)
+        if plan is not None and plan.levels:
+            after = max(after, self._inner_track_offset(name, plan.levels - 1) + 2)
         reserve = 0 if m.tb else self.title_reserve[name][1]
-        return body + m.pad_flow + 2 + reserve
+        return after + reserve
 
     def _layer_after(self, rank: int) -> int:
         """Offset from a layer's start to the first cell usable by tracks."""
@@ -1553,24 +1647,33 @@ class RoutePlanner:
 
     def _wire_channels(self) -> None:
         for channel, plan in self.channels.items():
-            for track in plan.tracks:
-                flow = self._track_flow(channel, track.level)
-                self._wire(track.net, (track.low, flow), (track.high, flow))
-            for jog in plan.jogs:
-                self._wire(
-                    jog.net,
-                    (jog.position, self._track_flow(channel, jog.upper_level)),
-                    (jog.position, self._track_flow(channel, jog.lower_level)),
-                )
-            for terminal, level in plan.terminal_level.items():
-                flow = self._track_flow(channel, level)
-                if isinstance(terminal, _Port):
-                    _, outside = self._port_cells(terminal)
-                    self._wire(terminal.edges[0].net, outside, (outside[0], flow))
-                else:
-                    terminal.points.append(flow)
+            self._wire_tracks(plan, lambda level, c=channel: self._track_flow(c, level))
             for upper, lower in plan.straight:
                 self._wire_straight(channel, upper, lower)
+        for name, plan in self.inner.items():
+            start = self.layer_flow[self._group_members(name)[0].rank]
+            self._wire_tracks(
+                plan, lambda level, n=name: start + self._inner_track_offset(n, level)
+            )
+
+    def _wire_tracks(self, plan: ChannelPlan, flow_of: Callable[[int], int]) -> None:
+        """Paint the tracks, jogs and stubs of one routed channel."""
+        for track in plan.tracks:
+            flow = flow_of(track.level)
+            self._wire(track.net, (track.low, flow), (track.high, flow))
+        for jog in plan.jogs:
+            self._wire(
+                jog.net,
+                (jog.position, flow_of(jog.upper_level)),
+                (jog.position, flow_of(jog.lower_level)),
+            )
+        for terminal, level in plan.terminal_level.items():
+            flow = flow_of(level)
+            if isinstance(terminal, _Port):
+                _, outside = self._port_cells(terminal)
+                self._wire(terminal.edges[0].net, outside, (outside[0], flow))
+            else:
+                terminal.points.append(flow)
 
     def _wire_straight(self, channel: int, upper, lower) -> None:
         """Two terminals facing each other: one straight line, no track."""
@@ -1694,6 +1797,7 @@ class RoutePlanner:
                 for layer in self.layers
             ],
             tracks_per_channel=[plan.levels for plan in self.channels.values()],
+            tracks_per_group={name: plan.levels for name, plan in self.inner.items()},
         )
 
     @staticmethod

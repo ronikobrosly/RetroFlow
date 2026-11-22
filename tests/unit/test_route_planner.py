@@ -624,8 +624,10 @@ class TestGroups:
         assert start + len(title) <= boundary.x + boundary.width - 1
         assert_plan_is_sound(plan)
 
-    def test_group_naming_only_unknown_nodes_is_ignored(self):
-        plan = plan_graph([("A", "B")], "TB", [GroupDefinition("Ghosts", ["Nobody"])])
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    def test_group_naming_only_unknown_nodes_is_ignored(self, direction):
+        ghosts = [GroupDefinition("Ghosts", ["Nobody"])]
+        plan = plan_graph([("A", "B")], direction, ghosts)
         assert plan.group_boundaries == []
         assert plan.group_title_x == {}
         assert_plan_is_sound(plan)
@@ -656,6 +658,121 @@ class TestGroups:
     def test_empty_group_is_ignored(self):
         plan = plan_graph([("A", "B")], "TB", [GroupDefinition("Nobody", [])])
         assert plan.group_boundaries == []
+
+
+def wires_outside(plan: RoutePlan, group_name: str) -> List[Tuple[int, int]]:
+    """Wire cells that are not strictly inside a group's dashed box."""
+    (boundary,) = [g for g in plan.group_boundaries if g.name == group_name]
+    left, top = boundary.x, boundary.y + 1  # the title row is above the box
+    right = boundary.x + boundary.width - 1
+    bottom = boundary.y + boundary.height - 1
+    return [
+        (x, y)
+        for (x, y), _ in plan.grid.cells()
+        if not (left < x < right and top < y < bottom)
+    ]
+
+
+class TestEdgesInsideGroups:
+    """Edges between the members of one group never leave its box."""
+
+    row = [GroupDefinition("Row", ["A", "B", "C"])]
+    row_chain = [("A", "B"), ("B", "C")]
+
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    def test_arc_is_routed_on_a_track_inside_the_group(self, direction):
+        plan = plan_graph(self.row_chain + [("A", "C")], direction, self.row)
+        assert plan.tracks_per_group == {"Row": 1}
+        assert wires_outside(plan, "Row") == []
+        assert_plan_is_sound(plan)
+
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    def test_self_loop_is_routed_inside_the_group(self, direction):
+        plan = plan_graph(self.row_chain + [("B", "B")], direction, self.row)
+        assert plan.tracks_per_group == {"Row": 1}
+        assert wires_outside(plan, "Row") == []
+        assert_plan_is_sound(plan)
+
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    def test_direct_lines_need_no_inner_track(self, direction):
+        plan = plan_graph(self.row_chain, direction, self.row)
+        assert plan.tracks_per_group == {}
+        assert wires_outside(plan, "Row") == []
+
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    def test_inner_tracks_do_not_use_the_channel_below(self, direction):
+        plan = plan_graph(
+            self.row_chain + [("A", "C"), ("C", "A")], direction, self.row
+        )
+        assert plan.tracks_per_group == {"Row": 2}
+        assert plan.tracks_per_channel == []
+
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    def test_opposite_arcs_nest_instead_of_crossing(self, direction):
+        plan = plan_graph([("A", "C"), ("C", "A"), ("A", "B")], direction, self.row)
+        assert plan.grid.crossing_count() == 0
+        assert wires_outside(plan, "Row") == []
+        assert_plan_is_sound(plan)
+
+    def test_tb_group_keeps_its_height_for_one_inner_track(self):
+        plain = plan_graph(self.row_chain, "TB", self.row)
+        arced = plan_graph(self.row_chain + [("A", "C")], "TB", self.row)
+        assert arced.group_boundaries[0].height == plain.group_boundaries[0].height
+
+    def test_tb_group_grows_two_rows_for_an_inner_track_without_shadow(self):
+        plain = plan_graph(self.row_chain, "TB", self.row, shadow=False)
+        arced = plan_graph(self.row_chain + [("A", "C")], "TB", self.row, shadow=False)
+        grown = arced.group_boundaries[0].height - plain.group_boundaries[0].height
+        assert grown == 2
+        assert wires_outside(arced, "Row") == []
+
+    def test_tb_group_grows_one_row_per_extra_inner_track(self):
+        groups = [GroupDefinition("Row", ["A", "B", "C", "D"])]
+        chain_of_four = [("A", "B"), ("B", "C"), ("C", "D")]
+        one = plan_graph(chain_of_four + [("A", "C")], "TB", groups)
+        two = plan_graph(chain_of_four + [("A", "C"), ("A", "D")], "TB", groups)
+        assert (one.tracks_per_group, two.tracks_per_group) == ({"Row": 1}, {"Row": 2})
+        assert two.group_boundaries[0].height == one.group_boundaries[0].height + 1
+
+    def test_lr_group_gets_longer_for_its_inner_tracks(self):
+        plain = plan_graph(self.row_chain, "LR", self.row)
+        arced = plan_graph(self.row_chain + [("A", "C")], "LR", self.row)
+        assert arced.group_boundaries[0].width == plain.group_boundaries[0].width + 1
+        assert wires_outside(arced, "Row") == []
+
+    def test_lr_title_reserve_accounts_for_inner_tracks(self):
+        title = "A Title That Is Longer Than The Box"
+        groups = [GroupDefinition(title, ["A", "B", "C"])]
+        plan = plan_graph(self.row_chain + [("A", "C")], "LR", groups)
+        (boundary,) = plan.group_boundaries
+        assert boundary.width == len(title) + 2
+        assert wires_outside(plan, title) == []
+        assert_plan_is_sound(plan)
+
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    def test_edges_leaving_the_group_cross_the_border_once_each(self, direction):
+        edges = self.row_chain + [("A", "C"), ("C", "Out"), ("In", "A")]
+        plan = plan_graph(edges, direction, self.row)
+        (boundary,) = plan.group_boundaries
+        left, top = boundary.x, boundary.y + 1
+        right = boundary.x + boundary.width - 1
+        bottom = boundary.y + boundary.height - 1
+        on_border = [
+            (x, y)
+            for (x, y), _ in plan.grid.cells()
+            if (x in (left, right) and top <= y <= bottom)
+            or (y in (top, bottom) and left <= x <= right)
+        ]
+        assert len(on_border) == 2
+        assert_plan_is_sound(plan)
+
+    def test_arc_outside_any_group_still_uses_the_channel(self):
+        # Three self loops on one three-row box: the third has no side row
+        # left and arcs under the box instead.
+        edges = [("A", "B"), ("B", "B"), ("C", "B"), ("D", "B"), ("B", "A")]
+        plan = plan_graph(edges + [("B", "C"), ("B", "D")], "TB")
+        assert plan.tracks_per_group == {}
+        assert_plan_is_sound(plan)
 
 
 class TestPictures:

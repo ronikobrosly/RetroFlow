@@ -6,7 +6,15 @@ Corpus of diagrams used by the complex-diagram and golden tests.
     COMPLEX_CASES  diagrams with many boxes and many edges; these must come
                    out *clean* (see diagram_checker.py), not byte-identical
     RANDOM_CASES   seeded pseudo-random graphs for breadth, some of them with
-                   random generator options and random groups
+                   random generator options
+
+Diagrams with group boxes mirror those three lists:
+
+    SIMPLE_GROUP_CASES   small grouped diagrams, pinned by golden files too
+    COMPLEX_GROUP_CASES  busy grouped diagrams: edges inside groups, around
+                         them and through several of them, real-world
+                         architectures, and groups crossed with the options
+    RANDOM_GROUP_CASES   seeded random graphs with random groups and options
 
 Every case is rendered top-to-bottom and left-to-right unless it says
 otherwise, and the complex cases cross a set of graphs with every generator
@@ -16,8 +24,10 @@ text width, box width):
     graph families ─┐
     cycles ─────────┤
     real-world ─────┼──► COMPLEX_CASES ──► x {TB, LR} ──► one test per concern
-    options matrix ─┤
-    groups ─────────┘
+    options matrix ─┘
+                            ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+    the same, in groups ──► ┆  COMPLEX_GROUP_CASES  ┆ ──► the same tests, plus
+                            └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘     test_group_diagrams.py
 
 Every case is plain RetroFlow input text plus optional generator options, so
 any failing case can be pasted straight into ``FlowchartGenerator.generate``.
@@ -45,6 +55,11 @@ class Case:
 def to_text(edges: Iterable[Edge], groups: Sequence[str] = ()) -> str:
     """Turn an edge list (and optional group lines) into input text."""
     return "\n".join([*groups, *(f"{s} -> {t}" for s, t in edges)])
+
+
+def with_groups(text: str, *groups: str) -> str:
+    """Put group definitions in front of an existing diagram."""
+    return "\n".join([*groups, text.strip("\n")])
 
 
 # ── graph families ──────────────────────────────────────────────────────
@@ -875,7 +890,7 @@ VERY_LONG_LABELS = "\n".join(
     )
 )
 
-# ── groups (experimental feature) ───────────────────────────────────────
+# ── groups ──────────────────────────────────────────────────────────────
 
 GROUPS_THREE_TIER = """
 [Frontend: Web Mobile]
@@ -1048,6 +1063,222 @@ Web Server -> Read Replica
 Primary Database -> Read Replica
 Read Replica -> Load Balancer
 """
+
+GROUPS_CHAIN_INSIDE = """
+[Assembly Line: Cut Weld Paint Pack]
+Order -> Cut
+Cut -> Weld
+Weld -> Paint
+Paint -> Pack
+Pack -> Ship
+Paint -> Weld
+Pack -> Cut
+"""
+
+# An edge between two outsiders has to travel past a group.
+GROUPS_BYPASS = """
+[Review: Lint Tests Security]
+Commit -> Lint
+Commit -> Tests
+Commit -> Security
+Commit -> Release
+Lint -> Release
+Tests -> Release
+Security -> Release
+Release -> Commit
+"""
+
+# Every member talks to every other member, in both directions.
+GROUPS_CLIQUE_INSIDE = "\n".join(
+    [
+        "[Quorum: N0 N1 N2 N3]",
+        "Client -> N0",
+        *(f"N{i} -> N{j}" for i in range(4) for j in range(4) if i != j),
+        "N3 -> Log",
+    ]
+)
+
+GROUPS_BIPARTITE = "\n".join(
+    [
+        "[Producers: P1 P2 P3]",
+        "[Consumers: C1 C2 C3]",
+        *(f"P{i} -> C{j}" for i in (1, 2, 3) for j in (1, 2, 3)),
+    ]
+)
+
+# Six groups in a row, with edges that skip over one or more of them.
+GROUPS_PIPELINE = """
+[Ingest: Kafka Files]
+[Parse: Decode Validate]
+[Enrich: Geo Session]
+[Store: Lake Index]
+[Serve: API Reports]
+[Watch: Alerts]
+Kafka -> Decode
+Files -> Decode
+Decode -> Validate
+Validate -> Geo
+Validate -> Session
+Geo -> Lake
+Session -> Lake
+Session -> Index
+Lake -> API
+Index -> API
+Lake -> Reports
+API -> Alerts
+Validate -> Alerts
+Kafka -> Lake
+Decode -> Index
+Alerts -> Kafka
+Reports -> Files
+"""
+
+GROUPS_HUB_AND_SPOKES = """
+[North: N1 N2 N3]
+[South: S1 S2 S3]
+N1 -> Hub
+N2 -> Hub
+N3 -> Hub
+Hub -> S1
+Hub -> S2
+Hub -> S3
+S1 -> Hub
+S3 -> N1
+N1 -> N3
+S1 -> S3
+"""
+
+GROUPS_BUSY_MEMBER = """
+[Core: Broker]
+[Clients: Web Mobile Kiosk Partner]
+[Sinks: Audit Metrics Archive]
+Web -> Broker
+Mobile -> Broker
+Kiosk -> Broker
+Partner -> Broker
+Broker -> Audit
+Broker -> Metrics
+Broker -> Archive
+Broker -> Broker
+Archive -> Broker
+Broker -> Web
+"""
+
+_COLLECT = "Collect the requirements from every stakeholder"
+_AGREE = "Agree on the scope"
+_BUILD = "Build the first vertical slice"
+_SHOW = "Demonstrate it to the stakeholders"
+
+GROUPS_LONG_LABELS = to_text(
+    [
+        (_COLLECT, _AGREE),
+        (_AGREE, _BUILD),
+        (_BUILD, _SHOW),
+        (_SHOW, _AGREE),
+        (_SHOW, "Ship"),
+    ],
+    [
+        f"[Requirements And Planning: {_COLLECT} {_AGREE}]",
+        f"[Delivery: {_BUILD} {_SHOW}]",
+    ],
+)
+
+# Members that would sit in three different layers without the group.
+GROUPS_ACROSS_LAYERS = """
+[Saga: Reserve Charge Confirm]
+Request -> Reserve
+Reserve -> Charge
+Charge -> Confirm
+Confirm -> Receipt
+Charge -> Refund
+Refund -> Reserve
+Request -> Receipt
+"""
+
+GROUPS_TWO_COMPONENTS = """
+[Blue: B1 B2]
+[Green: G1 G2 G3]
+B1 -> B2
+B2 -> Blue Out
+G1 -> G2
+G2 -> G3
+G3 -> G1
+Green In -> G1
+"""
+
+GROUPS_NEIGHBOURS_SWAPPED = """
+[Stack: Top Middle Bottom]
+Top -> Bottom
+Bottom -> Middle
+Middle -> Top
+Top -> Top
+In -> Middle
+Bottom -> Out
+"""
+
+MICROSERVICES_GROUPED = with_groups(
+    MICROSERVICES,
+    "[Services: Auth Users Orders Payments]",
+    "[Storage: UserDB OrderDB Ledger Cache]",
+    "[Messaging: Queue Notifier]",
+    "[Channels: Email SMS]",
+)
+
+CICD_GROUPED = with_groups(
+    CICD,
+    "[Checks: Lint Unit Tests Build]",
+    "[Staging: Deploy Staging Smoke Tests Load Tests]",
+    "[Production: Deploy Prod Monitor Rollback]",
+)
+
+KUBERNETES_GROUPED = with_groups(
+    KUBERNETES,
+    "[Services: Web Service API Service]",
+    "[Web Pods: Web Pod 1 Web Pod 2]",
+    "[API Pods: API Pod 1 API Pod 2 API Pod 3]",
+    "[State: Postgres Redis Volume]",
+)
+
+DATA_PLATFORM_GROUPED = with_groups(
+    DATA_PLATFORM,
+    "[Sources: Web Events Mobile Events Billing DB CRM]",
+    "[Lake: Raw Zone Clean Zone]",
+    "[Jobs: Stream Jobs Batch Jobs]",
+    "[ML: Feature Store Training Model Registry Serving]",
+)
+
+COMPILER_GROUPED = with_groups(
+    COMPILER,
+    "[Front End: Lexer Parser AST]",
+    "[Middle End: Type Checker Symbol Table IR Builder Optimizer]",
+    "[Back End: Code Gen Assembler Linker]",
+)
+
+CQRS_GROUPED = with_groups(
+    CQRS,
+    "[Write Side: Command API Command Handler Aggregate]",
+    "[Events: Event Store Event Bus Snapshots Dead Letters]",
+    "[Read Side: Projection A Projection B Read Model A Read Model B]",
+)
+
+MAP_REDUCE_GROUPED = with_groups(
+    MAP_REDUCE,
+    "[Splits: Split 1 Split 2 Split 3]",
+    "[Mappers: Map 1 Map 2 Map 3]",
+    "[Reducers: Reduce 1 Reduce 2]",
+)
+
+BIG_ARCHITECTURE_GROUPED = with_groups(
+    BIG_ARCHITECTURE,
+    "[Clients: Web Mobile Partner API]",
+    "[Edge: CDN API Gateway]",
+    "[Gatekeepers: Auth Service Rate Limiter]",
+    "[Shopping: Catalog Cart Search Accounts]",
+    "[Ordering: Checkout Payments Inventory Orders]",
+    "[Databases: Identity DB Catalog DB Ledger DB Inventory DB Orders DB]",
+    "[Async: Event Bus Notifications Analytics Fulfilment]",
+    "[Third Parties: Payment Provider Shipping Provider Email Provider Push Provider]",
+)
 
 # ── generator options that change the picture ───────────────────────────
 
@@ -1304,8 +1535,43 @@ _LABELS_AND_OPTIONS: List[Case] = [
     ),
 ]
 
-_GROUPS: List[Case] = [
+# Small grouped diagrams. Like SIMPLE_CASES these are pinned by golden files:
+# one group, a group and its surroundings, two or three groups in a row.
+SIMPLE_GROUP_CASES: List[Case] = [
+    Case("group_pair", "[Team: A B]\nA -> B"),
+    Case("group_single_member", "[Core: Engine]\nInput -> Engine\nEngine -> Output"),
+    Case("group_then_node", "[Stage: Build Test]\nBuild -> Test\nTest -> Deploy"),
+    Case("group_fan_out_into", "[Workers: Left Right]\nStart -> Left\nStart -> Right"),
+    Case("group_fan_in_from", "[Sources: A B C]\nA -> Sink\nB -> Sink\nC -> Sink"),
+    Case("group_diamond_middle", "[Middle: B C]\nA -> B\nA -> C\nB -> D\nC -> D"),
+    Case("group_two_way_pair", "[Loop: Fetch Parse]\nFetch -> Parse\nParse -> Fetch"),
+    Case("group_self_loop", "[Retry: Job]\nStart -> Job\nJob -> Job\nJob -> Done"),
+    Case("group_in_a_cycle", "[Hot Path: B]\nA -> B\nB -> C\nC -> A"),
+    Case("group_all_nodes", "[Everything: A B C]\nA -> B\nB -> C\nA -> C"),
+    Case("group_long_title", "[A Much Longer Group Title: X]\nX -> Y"),
+    Case(
+        "group_multi_word_names",
+        "[Auth Flow: User Login Check Token]\n"
+        "User Login -> Check Token\nCheck Token -> Home Page",
+    ),
+    Case("two_groups_chain", "[Front: Web]\n[Back: Api]\nWeb -> Api"),
+    Case(
+        "two_groups_pairs",
+        "[Front: Web Mobile]\n[Back: Api Db]\nWeb -> Api\nMobile -> Api\nApi -> Db",
+    ),
+    Case(
+        "three_groups_chain",
+        "[In: Read]\n[Work: Parse Check]\n[Out: Write]\n"
+        "Read -> Parse\nParse -> Check\nCheck -> Write",
+    ),
     Case("groups_readme", GROUPS_README),
+    Case("group_no_shadow", "[Team: A B]\nA -> B\nB -> C", {"shadow": False}),
+    Case("group_rounded", "[Team: A B]\nA -> B\nB -> C", {"rounded": True}),
+    Case("group_expanded", "[Team: A B]\nA -> B\nB -> C", {"compact": False}),
+    Case("group_titled", "[Team: A B]\nA -> B\nB -> C", {"title": "Who Does What"}),
+]
+
+_GROUP_SHAPES: List[Case] = [
     Case("groups_three_tier", GROUPS_THREE_TIER),
     Case("groups_with_cycle", GROUPS_WITH_CYCLE),
     Case("groups_partial", GROUPS_PARTIAL),
@@ -1319,29 +1585,94 @@ _GROUPS: List[Case] = [
     Case("groups_same_layer", GROUPS_SAME_LAYER),
     Case("groups_everything", GROUPS_EVERYTHING),
     Case("groups_multi_word", GROUPS_MULTI_WORD),
-    # Groups crossed with the options that move their borders and titles.
-    *(
-        Case(
-            f"groups_dense_{option_name}", GROUPS_DENSE, dict(OPTION_SETS[option_name])
-        )
-        for option_name in (
-            "no_shadow",
-            "rounded",
-            "expanded",
-            "titled",
-            "tight_spacing",
-            "wide_spacing",
-            "narrow_text",
-            "plain_expanded_rounded",
-        )
+    Case("groups_chain_inside", GROUPS_CHAIN_INSIDE),
+    Case("groups_bypass", GROUPS_BYPASS),
+    Case("groups_clique_inside", GROUPS_CLIQUE_INSIDE),
+    Case("groups_bipartite", GROUPS_BIPARTITE),
+    Case("groups_pipeline", GROUPS_PIPELINE),
+    Case("groups_hub_and_spokes", GROUPS_HUB_AND_SPOKES),
+    Case("groups_busy_member", GROUPS_BUSY_MEMBER),
+    Case("groups_long_labels", GROUPS_LONG_LABELS),
+    Case("groups_across_layers", GROUPS_ACROSS_LAYERS),
+    Case("groups_two_components", GROUPS_TWO_COMPONENTS),
+    Case("groups_neighbours_swapped", GROUPS_NEIGHBOURS_SWAPPED),
+    # Graph families with one layer (or every layer) put in a group.
+    Case(
+        "groups_fan_out_leaves",
+        to_text(fan_out(5), ["[Leaves: Leaf 1 Leaf 2 Leaf 3 Leaf 4 Leaf 5]"]),
     ),
-    *(
-        Case(
-            f"groups_everything_{option_name}",
-            GROUPS_EVERYTHING,
-            dict(OPTION_SETS[option_name]),
-        )
-        for option_name in ("no_shadow", "expanded", "long_title", "tight_no_shadow")
+    Case(
+        "groups_hourglass_ends",
+        to_text(
+            hourglass(3), ["[Inputs: In 1 In 2 In 3]", "[Outputs: Out 1 Out 2 Out 3]"]
+        ),
+    ),
+    Case(
+        "groups_dense_layers",
+        to_text(
+            dense_layers((2, 3, 2)),
+            ["[Upper: L0.0 L0.1]", "[Middle: L1.0 L1.1 L1.2]", "[Lower: L2.0 L2.1]"],
+        ),
+    ),
+    Case(
+        "groups_ladder_rails",
+        to_text(ladder(3), ["[Rung 0: A0 B0]", "[Rung 1: A1 B1]", "[Rung 2: A2 B2]"]),
+    ),
+    Case(
+        "groups_complete_dag_halves",
+        to_text(complete_dag(6), ["[Early: N0 N1 N2]", "[Late: N3 N4 N5]"]),
+    ),
+    Case(
+        "groups_skip_chain",
+        to_text(chain_with_skips(7, (2, 3)), ["[Mid: S2 S3]", "[End: S5 S6]"]),
+    ),
+    Case(
+        "groups_back_edges_chain",
+        to_text(
+            chain_with_back_edges(6, [(4, 1), (5, 0), (3, 2)]),
+            ["[Head: S0 S1]", "[Tail: S4 S5]"],
+        ),
+    ),
+]
+
+_GROUP_REAL_WORLD: List[Case] = [
+    Case("microservices_grouped", MICROSERVICES_GROUPED),
+    Case("cicd_grouped", CICD_GROUPED),
+    Case("kubernetes_grouped", KUBERNETES_GROUPED),
+    Case("data_platform_grouped", DATA_PLATFORM_GROUPED),
+    Case("compiler_grouped", COMPILER_GROUPED),
+    Case("cqrs_grouped", CQRS_GROUPED),
+    Case("map_reduce_grouped", MAP_REDUCE_GROUPED),
+    Case("big_architecture_grouped", BIG_ARCHITECTURE_GROUPED),
+]
+
+# Groups crossed with every option that moves their borders and titles.
+_GROUP_OPTION_SUBJECTS = {
+    "groups_dense": GROUPS_DENSE,
+    "groups_everything": GROUPS_EVERYTHING,
+    "groups_chain_inside": GROUPS_CHAIN_INSIDE,
+    "cicd_grouped": CICD_GROUPED,
+}
+
+_GROUP_OPTION_MATRIX: List[Case] = [
+    Case(f"{subject}_{option_name}", text, dict(options))
+    for subject, text in _GROUP_OPTION_SUBJECTS.items()
+    for option_name, options in OPTION_SETS.items()
+]
+
+COMPLEX_GROUP_CASES: List[Case] = [
+    *_GROUP_SHAPES,
+    *_GROUP_REAL_WORLD,
+    *_GROUP_OPTION_MATRIX,
+    Case(
+        "big_architecture_grouped_tight",
+        BIG_ARCHITECTURE_GROUPED,
+        {"horizontal_spacing": 4, "vertical_spacing": 1, "shadow": False},
+    ),
+    Case(
+        "microservices_grouped_titled_rounded",
+        MICROSERVICES_GROUPED,
+        {"title": "Order Platform", "rounded": True},
     ),
 ]
 
@@ -1351,7 +1682,6 @@ COMPLEX_CASES: List[Case] = [
     *_REAL_WORLD,
     *_LABELS_AND_OPTIONS,
     *_OPTION_MATRIX,
-    *_GROUPS,
 ]
 
 
@@ -1388,11 +1718,32 @@ def random_groups(edges: Sequence[Edge], seed: int) -> List[str]:
     return lines
 
 
+def scattered_groups(edges: Sequence[Edge], seed: int) -> List[str]:
+    """Seeded group lines whose members are picked from anywhere in the graph."""
+    rng = random.Random(seed)
+    free = list(dict.fromkeys(name for edge in edges for name in edge))
+    lines: List[str] = []
+    for _ in range(1 + int(rng.random() * 3)):
+        size = min(len(free), 1 + int(rng.random() * 4))
+        members = [free.pop(int(rng.random() * len(free))) for _ in range(size)]
+        if members:
+            lines.append(f"[Area {len(lines) + 1}: {' '.join(members)}]")
+    return lines
+
+
 def _random_grouped_case(seed: int) -> Case:
     edges = random_graph(300 + seed, 6 + seed % 6, 0.12, seed % 3)
     return Case(
         f"random_grouped_{seed:02d}", to_text(edges, random_groups(edges, 400 + seed))
     )
+
+
+def _random_scattered_case(seed: int) -> Case:
+    """Scattered groups, extra edges inside them, and random options."""
+    edges = random_graph(700 + seed, 7 + seed % 7, 0.14, seed % 4)
+    groups = scattered_groups(edges, 800 + seed)
+    options = random_options(900 + seed) if seed % 2 else {}
+    return Case(f"random_scattered_{seed:02d}", to_text(edges, groups), options)
 
 
 RANDOM_CASES: List[Case] = [
@@ -1436,8 +1787,19 @@ RANDOM_CASES: List[Case] = [
         )
         for seed in range(24)
     ),
-    # Random graphs with random groups.
+]
+
+RANDOM_GROUP_CASES: List[Case] = [
+    # Groups made of nodes that were written next to each other.
     *(_random_grouped_case(seed) for seed in range(16)),
+    # Groups made of nodes from anywhere, half of them with random options.
+    *(_random_scattered_case(seed) for seed in range(24)),
+]
+
+GROUP_CASES: List[Case] = [
+    *SIMPLE_GROUP_CASES,
+    *COMPLEX_GROUP_CASES,
+    *RANDOM_GROUP_CASES,
 ]
 
 

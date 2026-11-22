@@ -29,16 +29,23 @@ from retroflow import FlowchartGenerator
 from .diagram_checker import DiagramReport, check_diagram
 from .diagram_corpus import (
     COMPLEX_CASES,
+    COMPLEX_GROUP_CASES,
     RANDOM_CASES,
+    RANDOM_GROUP_CASES,
     rendering_id,
     renderings,
 )
 
-COMPLEX_RENDERINGS = renderings(COMPLEX_CASES)
-RANDOM_RENDERINGS = renderings(RANDOM_CASES)
+# Grouped diagrams have to pass everything here too; what is special about
+# group boxes is checked in test_group_diagrams.py.
+ALL_COMPLEX_CASES = COMPLEX_CASES + COMPLEX_GROUP_CASES
+ALL_RANDOM_CASES = RANDOM_CASES + RANDOM_GROUP_CASES
+
+COMPLEX_RENDERINGS = renderings(ALL_COMPLEX_CASES)
+RANDOM_RENDERINGS = renderings(ALL_RANDOM_CASES)
 CROSSING_FREE_RENDERINGS = renderings(c for c in COMPLEX_CASES if c.crossing_free)
 
-_CASES_BY_NAME = {case.name: case for case in COMPLEX_CASES + RANDOM_CASES}
+_CASES_BY_NAME = {case.name: case for case in ALL_COMPLEX_CASES + ALL_RANDOM_CASES}
 
 
 @lru_cache(maxsize=None)

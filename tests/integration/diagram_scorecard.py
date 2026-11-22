@@ -21,8 +21,11 @@ from integration.diagram_checker import (  # noqa: E402
 )
 from integration.diagram_corpus import (  # noqa: E402
     COMPLEX_CASES,
+    COMPLEX_GROUP_CASES,
     RANDOM_CASES,
+    RANDOM_GROUP_CASES,
     SIMPLE_CASES,
+    SIMPLE_GROUP_CASES,
     rendering_id,
     renderings,
 )
@@ -35,6 +38,9 @@ def main(argv: list) -> int:
         ("simple", SIMPLE_CASES),
         ("complex", COMPLEX_CASES),
         ("random", RANDOM_CASES),
+        ("groups simple", SIMPLE_GROUP_CASES),
+        ("groups complex", COMPLEX_GROUP_CASES),
+        ("groups random", RANDOM_GROUP_CASES),
     )
 
     for suite_name, cases in suites:

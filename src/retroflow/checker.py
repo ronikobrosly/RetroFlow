@@ -41,21 +41,47 @@ Errors (the picture is wrong)
 ``missing_edge``           an input edge cannot be traced in the picture
 ``phantom_edge``           the picture shows an edge that is not in the input
 ``stray_line``             a line with no source box or no target box
+``group_missing``          a group's dashed box or title cannot be found, or
+                           does not enclose the group's members
+``group_overlap``          a group box overlaps another group box, or frames
+                           a node box that is not one of its members
 ``debug_mismatch``         debug and non-debug renders differ
 
 Warnings (the picture is right but hard to read)
 ------------------------------------------------
 ``adjacent_lines``         two unconnected vertical strokes in touching columns
+``group_crowded``          something sits too close to a group box (see below)
+``group_crossing``         a line crosses a group border without needing to
+
+Group boxes
+-----------
+A group is a dashed box with its title on the row above. The only thing that
+may touch its border is a line crossing it at a right angle, and only where
+the border is straight:
+
+         Title            a member keeps 2 cells from the border,
+    ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┐       a line running along the border keeps 1 blank
+    ┆             ┆░      cell from it and from its shadow,
+    ┆  ┌─────┐    ┆░      an arrowhead never touches the border,
+    ┆  │  A  │──────►     boxes and groups outside keep 1 blank cell, and
+    ┆  └─────┘░   ┆░      nothing but blank space touches the title.
+    └┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
+     ░░░░░░░░░░░░░░░
+
+A line also crosses a group border only when it has to: an edge between two
+members stays inside the box, and an edge between two outsiders stays out.
 """
 
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from .models import GroupDefinition
 from .parser import Parser
 
 Cell = Tuple[int, int]
 Edge = Tuple[str, str]
+Rect = Tuple[int, int, int, int]  # left, top, right, bottom (all inclusive)
 
 # Arms of every line glyph the edge renderer may produce.
 LINE_ARMS: Dict[str, str] = {
@@ -100,9 +126,17 @@ ERROR_CODES = (
     "missing_edge",
     "phantom_edge",
     "stray_line",
+    "group_missing",
+    "group_overlap",
     "debug_mismatch",
 )
-WARNING_CODES = ("adjacent_lines",)
+WARNING_CODES = ("adjacent_lines", "group_crowded", "group_crossing")
+
+# Cells a group member keeps between its own border and the group's border.
+GROUP_MEMBER_CLEARANCE = 2
+# Blank cells between a group box (shadow and title included) and anything
+# outside it, and between a group border and a line running along it.
+GROUP_CLEARANCE = 1
 
 
 @dataclass(frozen=True)
@@ -150,6 +184,58 @@ class Box:
         return "interior"
 
 
+@dataclass(frozen=True)
+class GroupBox:
+    """A dashed group box found in the boxes-only canvas (title row excluded)."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+    shadow: bool = False
+    name: str = ""  # filled in once the box is matched to a group
+
+    @property
+    def right(self) -> int:
+        return self.x + self.width - 1
+
+    @property
+    def bottom(self) -> int:
+        return self.y + self.height - 1
+
+    def footprint(self) -> Tuple[int, int, int, int]:
+        """(left, top, right, bottom) of the box and its shadow."""
+        extra = 1 if self.shadow else 0
+        return (self.x, self.y, self.right + extra, self.bottom + extra)
+
+    def encloses(self, box: Box) -> bool:
+        """Is a node box strictly inside the dashed border?"""
+        return (
+            self.x < box.x
+            and box.x + box.width - 1 < self.right
+            and self.y < box.y
+            and box.y + box.height - 1 < self.bottom
+        )
+
+    def border_cells(self) -> Dict[Cell, str]:
+        """Every border cell and the side it is on (corners: 'corner')."""
+        cells: Dict[Cell, str] = {}
+        for cx in range(self.x, self.right + 1):
+            cells[(cx, self.y)] = "top"
+            cells[(cx, self.bottom)] = "bottom"
+        for cy in range(self.y, self.bottom + 1):
+            cells[(self.x, cy)] = "left"
+            cells[(self.right, cy)] = "right"
+        for corner in (
+            (self.x, self.y),
+            (self.right, self.y),
+            (self.x, self.bottom),
+            (self.right, self.bottom),
+        ):
+            cells[corner] = "corner"
+        return cells
+
+
 @dataclass
 class DiagramReport:
     """Everything the checker learned about one rendered diagram."""
@@ -158,6 +244,7 @@ class DiagramReport:
     expected_edges: Set[Edge]
     drawn_edges: Set[Edge] = field(default_factory=set)
     boxes: Dict[str, Box] = field(default_factory=dict)
+    group_boxes: List[GroupBox] = field(default_factory=list)
     issues: List[Issue] = field(default_factory=list)
     crossings: int = 0
     junctions: int = 0
@@ -202,8 +289,16 @@ def expected_edges_of(input_text: str) -> Set[Edge]:
     return {(normalize_name(s), normalize_name(t)) for s, t in connections}
 
 
+def expected_groups_of(input_text: str) -> List[GroupDefinition]:
+    """The groups the input text asks for."""
+    return Parser().parse_with_groups(input_text).groups
+
+
 def analyze_rendering(
-    base_lines: Iterable[str], output: str, expected_edges: Set[Edge]
+    base_lines: Iterable[str],
+    output: str,
+    expected_edges: Set[Edge],
+    groups: Optional[Sequence[GroupDefinition]] = None,
 ) -> DiagramReport:
     """
     Check a finished rendering against its boxes-only canvas.
@@ -213,17 +308,28 @@ def analyze_rendering(
             before any edge was drawn.
         output: The finished diagram text.
         expected_edges: Edges the diagram is supposed to show.
+        groups: Groups the diagram is supposed to show. When given, every
+            group must be drawn around exactly its members, under its title.
+            Dashed boxes found in the picture are checked for crowding
+            either way.
 
     Returns:
         A ``DiagramReport``.
     """
-    return _Analysis(list(base_lines), output, set(expected_edges)).run()
+    return _Analysis(list(base_lines), output, set(expected_edges), groups).run()
 
 
 class _Analysis:
     """Single-use worker behind ``analyze_rendering``."""
 
-    def __init__(self, base_lines: List[str], output: str, expected: Set[Edge]):
+    def __init__(
+        self,
+        base_lines: List[str],
+        output: str,
+        expected: Set[Edge],
+        groups: Optional[Sequence[GroupDefinition]] = None,
+    ):
+        self.groups = groups
         final_lines = output.split("\n")
         self.height = max(len(base_lines), len(final_lines))
         self.width = max((len(row) for row in base_lines + final_lines), default=0)
@@ -241,6 +347,7 @@ class _Analysis:
         self.parent: Dict[Tuple[Cell, str], Tuple[Cell, str]] = {}
         self.exits: List[Tuple[Tuple[Cell, str], str]] = []  # (line key, node)
         self.entries: List[Tuple[Tuple[Cell, str], str]] = []
+        self.titles: Dict[int, Rect] = {}  # index in report.group_boxes -> title
 
     # ── grid helpers ────────────────────────────────────────────────────
 
@@ -268,6 +375,7 @@ class _Analysis:
 
     def run(self) -> DiagramReport:
         self._find_boxes()
+        self._find_groups()
         self._split_layers()
         self._add_group_border_passthroughs()
         self._check_glyph_connections()
@@ -275,6 +383,8 @@ class _Analysis:
         self._check_ports()
         self._read_edges()
         self._check_adjacent_lines()
+        self._check_group_surroundings()
+        self._check_group_crossings()
         return self.report
 
     # ── step 1: boxes ───────────────────────────────────────────────────
@@ -316,6 +426,70 @@ class _Analysis:
                     self.owner[(cx, cy)] = box.name
                     if side != "interior":
                         self.border[(cx, cy)] = (box.name, side)
+
+    # ── step 1b: group boxes ────────────────────────────────────────────
+
+    def _find_groups(self) -> None:
+        """Locate dashed group boxes and match them to the expected groups."""
+        found: List[GroupBox] = []
+        for y in range(self.height):
+            for x in range(self.width):
+                if self.base[y][x] != "┌":
+                    continue
+                if self._at(self.base, (x + 1, y)) != DASHED_HORIZONTAL:
+                    continue
+                rect = self._trace_rectangle(
+                    x, y, DASHED_HORIZONTAL, DASHED_VERTICAL, "┐", "└", "┘"
+                )
+                if rect:
+                    shadow = self._at(self.base, (x + rect[0], y + 1)) == SHADOW
+                    found.append(GroupBox(x, y, rect[0], rect[1], shadow))
+        self.report.group_boxes = found
+
+        for group in self.groups or ():
+            members = [
+                self.report.boxes[name]
+                for name in map(normalize_name, group.members)
+                if name in self.report.boxes
+            ]
+            holders = [
+                index
+                for index, candidate in enumerate(found)
+                if members and all(candidate.encloses(box) for box in members)
+            ]
+            if not holders:
+                self._add(
+                    "group_missing",
+                    f"no dashed box encloses the members of group '{group.name}'",
+                )
+                continue
+            index = min(holders, key=lambda i: found[i].width * found[i].height)
+            box = found[index] = GroupBox(
+                found[index].x,
+                found[index].y,
+                found[index].width,
+                found[index].height,
+                found[index].shadow,
+                group.name,
+            )
+            self._find_group_title(index, box)
+
+    def _find_group_title(self, index: int, box: GroupBox) -> None:
+        """A group's title sits on the row above its box, within its width."""
+        row = box.y - 1
+        start = self.base[row].find(box.name, box.x, box.right + 1) if row >= 0 else -1
+        if start < 0:
+            self._add(
+                "group_missing",
+                f"title of group '{box.name}' is not above its box",
+                (box.x, box.y),
+            )
+            return
+        end = start + len(box.name) - 1
+        self.titles[index] = (start, row, end, row)
+        # Blanks between the words of a title belong to the title too.
+        for cx in range(start, end + 1):
+            self.protected.add((cx, row))
 
     def _trace_rectangle(
         self,
@@ -635,6 +809,11 @@ class _Analysis:
             return self.arrows[cell] in "UD"
         return any(d in self.arms.get(cell, "") for d in "UD")
 
+    def _has_horizontal_stroke(self, cell: Cell) -> bool:
+        if cell in self.arrows:
+            return self.arrows[cell] in "LR"
+        return any(d in self.arms.get(cell, "") for d in "LR")
+
     def _check_adjacent_lines(self) -> None:
         """Flag vertical strokes in touching columns that are not one line."""
         for y in range(self.height):
@@ -657,3 +836,227 @@ class _Analysis:
                         (run_start, y),
                     )
                     run_start = None
+
+    # ── step 8: group boxes keep their distance ─────────────────────────
+
+    @staticmethod
+    def _apart(a: Rect, b: Rect) -> int:
+        """Blank cells between two rectangles (-1 when they overlap)."""
+        across = max(a[0] - b[2], b[0] - a[2]) - 1
+        down = max(a[1] - b[3], b[1] - a[3]) - 1
+        return max(across, down, -1)
+
+    def _box_footprint(self, box: Box) -> Rect:
+        """A node box and its shadow."""
+        shadow = self._at(self.base, (box.x + box.width, box.y + 1)) == SHADOW
+        extra = 1 if shadow else 0
+        return (
+            box.x,
+            box.y,
+            box.x + box.width - 1 + extra,
+            box.y + box.height - 1 + extra,
+        )
+
+    @staticmethod
+    def _label(group: GroupBox) -> str:
+        if group.name:
+            return f"group '{group.name}'"
+        return f"the group box at (x={group.x}, y={group.y})"
+
+    def _check_group_surroundings(self) -> None:
+        groups = self.report.group_boxes
+        for index, group in enumerate(groups):
+            self._check_group_neighbours(index, group)
+            self._check_group_boxes(index, group)
+            self._check_group_title(index, group)
+            self._check_lines_along_border(group)
+        self._check_arrows_at_borders()
+
+    def _check_group_neighbours(self, index: int, group: GroupBox) -> None:
+        """Group boxes (and their titles) never overlap or touch."""
+        mine = [group.footprint()]
+        if index in self.titles:
+            mine.append(self.titles[index])
+        for other_index in range(index + 1, len(self.report.group_boxes)):
+            other = self.report.group_boxes[other_index]
+            theirs = [other.footprint()]
+            if other_index in self.titles:
+                theirs.append(self.titles[other_index])
+            apart = min(self._apart(a, b) for a in mine for b in theirs)
+            pair = f"{self._label(group)} and {self._label(other)}"
+            if apart < 0:
+                self._add("group_overlap", f"{pair} overlap", (other.x, other.y))
+            elif apart < GROUP_CLEARANCE:
+                self._add("group_crowded", f"{pair} touch", (other.x, other.y))
+
+    def _check_group_boxes(self, index: int, group: GroupBox) -> None:
+        """Members sit well inside the border; every other box well outside."""
+        members = None
+        if self.groups is not None and group.name:
+            members = {
+                normalize_name(member)
+                for definition in self.groups
+                if definition.name == group.name
+                for member in definition.members
+            }
+        rect = (group.x, group.y, group.right, group.bottom)
+        label = self._label(group)
+
+        for box in self.report.boxes.values():
+            where = (box.x, box.y)
+            box_rect = (
+                box.x,
+                box.y,
+                box.x + box.width - 1,
+                box.y + box.height - 1,
+            )
+            if group.encloses(box):
+                if members is not None and box.name not in members:
+                    self._add(
+                        "group_overlap",
+                        f"box '{box.name}' is inside {label} without being a member",
+                        where,
+                    )
+                elif self._apart_inside(box_rect, rect) < GROUP_MEMBER_CLEARANCE:
+                    self._add(
+                        "group_crowded",
+                        f"box '{box.name}' is too close to the border of {label}",
+                        where,
+                    )
+            else:
+                # A box that is not enclosed cannot be on the border either:
+                # it would have overwritten the border, and the group would
+                # not have been found. So it is outside; is it far enough?
+                near = [group.footprint()]
+                if index in self.titles:
+                    near.append(self.titles[index])
+                footprint = self._box_footprint(box)
+                if min(self._apart(footprint, r) for r in near) < GROUP_CLEARANCE:
+                    self._add(
+                        "group_crowded", f"box '{box.name}' touches {label}", where
+                    )
+
+    @staticmethod
+    def _apart_inside(inner: Rect, outer: Rect) -> int:
+        """Smallest number of cells between an inner rectangle and its frame."""
+        return (
+            min(
+                inner[0] - outer[0],
+                inner[1] - outer[1],
+                outer[2] - inner[2],
+                outer[3] - inner[3],
+            )
+            - 1
+        )
+
+    def _check_group_title(self, index: int, group: GroupBox) -> None:
+        """Nothing but blank space touches a title or runs right above it."""
+        if index not in self.titles:
+            return
+        start, row, end, _ = self.titles[index]
+        label = self._label(group)
+        for cell in ((start - 1, row), (end + 1, row)):
+            if self._at(self.final, cell) != " ":
+                self._add(
+                    "group_crowded",
+                    f"'{self._at(self.final, cell)}' touches the title of {label}",
+                    cell,
+                )
+        above = [
+            (cx, row - 1)
+            for cx in range(start, end + 1)
+            if self._has_horizontal_stroke((cx, row - 1))
+        ]
+        if above:
+            self._add(
+                "group_crowded",
+                f"a line runs right above the title of {label}",
+                above[0],
+            )
+
+    def _check_lines_along_border(self, group: GroupBox) -> None:
+        """A line running along a border keeps a blank cell away from it."""
+        shadow = 1 if group.shadow else 0
+        reach = GROUP_CLEARANCE
+        # (cells of the side, step away from the box, distance to check on
+        #  the outside, are the strokes to look for vertical?)
+        columns = range(group.x, group.right + 1 + shadow)
+        rows = range(group.y, group.bottom + 1 + shadow)
+        sides = (
+            ("left", [(group.x, cy) for cy in rows], (-1, 0), reach, True),
+            ("right", [(group.right, cy) for cy in rows], (1, 0), reach + shadow, True),
+            ("top", [(cx, group.y) for cx in columns], (0, -1), reach, False),
+            (
+                "bottom",
+                [(cx, group.bottom) for cx in columns],
+                (0, 1),
+                reach + shadow,
+                False,
+            ),
+        )
+        for side, cells, (dx, dy), outside, vertical in sides:
+            stroke = (
+                self._has_vertical_stroke if vertical else self._has_horizontal_stroke
+            )
+            hugging: List[Cell] = []
+            for cx, cy in cells:
+                near = [(cx + dx * d, cy + dy * d) for d in range(1, outside + 1)] + [
+                    (cx - dx * d, cy - dy * d) for d in range(1, reach + 1)
+                ]
+                hugging += [cell for cell in near if stroke(cell)]
+            if hugging:
+                first = min(hugging, key=lambda cell: (cell[1], cell[0]))
+                self._add(
+                    "group_crowded",
+                    f"a line runs along the {side} border of {self._label(group)}",
+                    first,
+                )
+
+    def _check_arrows_at_borders(self) -> None:
+        """An arrowhead keeps a cell of line between itself and a border."""
+        borders: Dict[Cell, GroupBox] = {}
+        for group in self.report.group_boxes:
+            for cell in group.border_cells():
+                borders[cell] = group
+        for cell, head in sorted(self.arrows.items()):
+            tail = self._step(cell, OPPOSITE[head])
+            if tail in borders:
+                self._add(
+                    "group_crowded",
+                    f"an arrowhead touches the border of {self._label(borders[tail])}",
+                    cell,
+                )
+
+    # ── step 9: lines cross a group border only when they have to ───────
+
+    def _check_group_crossings(self) -> None:
+        """
+        A crossing says "this edge leaves the group".
+
+        So an edge between two members must stay inside the box, and an edge
+        between two boxes outside must not pass through it.
+        """
+        sources, targets = self._line_endpoints()
+        for group in self.report.group_boxes:
+            border = group.border_cells()
+            crossed: Dict[Tuple[Cell, str], Cell] = {}
+            for cell in sorted(border):
+                for direction in self.arms.get(cell, ""):
+                    crossed.setdefault(self._find(self._key(cell, direction)), cell)
+
+            for line, cell in sorted(crossed.items(), key=lambda item: item[1]):
+                ends = sources.get(line, set()) | targets.get(line, set())
+                inside = {
+                    name
+                    for name in ends
+                    if name in self.report.boxes
+                    and group.encloses(self.report.boxes[name])
+                }
+                if not ends or (inside and inside != ends):
+                    continue  # connects a member to the outside (or is stray)
+                what = "between members leaves" if inside else "passes through"
+                self._add(
+                    "group_crossing",
+                    f"a line {what} {self._label(group)}",
+                    cell,
+                )

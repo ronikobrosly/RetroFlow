@@ -7,13 +7,19 @@ Unit tests for the renderer gate in ``FlowchartGenerator.generate``.
               planned renderer ──► better than classic? ──► returned
 
 The gate is what protects small diagrams (they keep their exact classic
-output) while busy diagrams get the planned renderer.
+output) while busy diagrams get the planned renderer. Diagrams with group
+boxes always go on to the planned renderer, which is the only one that
+routes edges with the group borders in mind.
 """
 
 import pytest
 
 from retroflow import FlowchartGenerator
-from retroflow.checker import analyze_rendering, expected_edges_of
+from retroflow.checker import (
+    analyze_rendering,
+    expected_edges_of,
+    expected_groups_of,
+)
 from retroflow.generator import WIRE_REASONS
 
 SIMPLE = "A -> B\nB -> C"
@@ -33,7 +39,10 @@ Gateway -> Cache
 def is_clean(text: str, generator: FlowchartGenerator) -> bool:
     output = generator.generate(text, debug=True)
     base = generator.get_trace().get_canvas_at_stage("boxes_drawn")
-    return not analyze_rendering(base, output, expected_edges_of(text)).issues
+    report = analyze_rendering(
+        base, output, expected_edges_of(text), expected_groups_of(text)
+    )
+    return not report.issues
 
 
 class TestWhichRendererIsUsed:
@@ -82,6 +91,32 @@ class TestWhichRendererIsUsed:
     def test_grouped_diagram_is_clean(self, direction):
         assert is_clean(GROUPED, FlowchartGenerator(direction=direction))
 
+    @pytest.mark.parametrize("direction", ["TB", "LR"])
+    @pytest.mark.parametrize("text", [GROUPED, "[Team: A B]\nA -> B"])
+    def test_grouped_diagram_is_always_planned(self, direction, text):
+        generator = FlowchartGenerator(direction=direction)
+        generator.generate(text)
+        assert generator.last_renderer == "planned"
+
+    def test_tiny_grouped_diagram_is_planned_even_if_classic_is_clean(self):
+        text = "[Team: A B]\nA -> B"
+        generator = FlowchartGenerator()
+        parsed = generator.parser.parse_with_groups(text)
+        classic, base = generator._render_classic(parsed, None, None)
+        report = analyze_rendering(
+            base, classic, expected_edges_of(text), expected_groups_of(text)
+        )
+        assert not report.issues
+
+        planned, _ = generator._render_planned(parsed, None, None)
+        assert generator.generate(text) == planned
+        assert generator.last_renderer == "planned"
+
+    def test_same_graph_without_groups_keeps_the_classic_renderer(self):
+        generator = FlowchartGenerator()
+        generator.generate("A -> B")
+        assert generator.last_renderer == "classic"
+
     def test_renderer_can_change_between_calls(self):
         generator = FlowchartGenerator()
         generator.generate(SKIP_EDGE)
@@ -127,6 +162,45 @@ class TestFallback:
             generator, "_render_planned", lambda *args, **kwargs: (classic, base)
         )
         assert generator.generate(SKIP_EDGE) == classic
+        assert generator.last_renderer == "classic"
+
+    def test_grouped_diagram_falls_back_when_the_planner_fails(self, monkeypatch):
+        generator = FlowchartGenerator()
+        parsed = generator.parser.parse_with_groups(GROUPED)
+        classic, _ = generator._render_classic(parsed, None, None)
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("planner broke")
+
+        monkeypatch.setattr(generator, "_render_planned", explode)
+        assert generator.generate(GROUPED) == classic
+        assert generator.last_renderer == "classic"
+
+    def test_grouped_planned_picture_wins_a_tie(self, monkeypatch):
+        generator = FlowchartGenerator()
+        parsed = generator.parser.parse_with_groups(GROUPED)
+        classic, base = generator._render_classic(parsed, None, None)
+
+        # Same picture, so the same issues: with groups the planner is kept.
+        monkeypatch.setattr(
+            generator, "_render_planned", lambda *args, **kwargs: (classic, base)
+        )
+        assert generator.generate(GROUPED) == classic
+        assert generator.last_renderer == "planned"
+
+    def test_grouped_planned_picture_that_is_worse_is_not_used(self, monkeypatch):
+        text = "[Team: A B]\nA -> B"
+        generator = FlowchartGenerator()
+        parsed = generator.parser.parse_with_groups(text)
+        classic, base = generator._render_classic(parsed, None, None)
+
+        # The "planned" picture has lost its only edge.
+        monkeypatch.setattr(
+            generator,
+            "_render_planned",
+            lambda *args, **kwargs: ("\n".join(base), base),
+        )
+        assert generator.generate(text) == classic
         assert generator.last_renderer == "classic"
 
     def test_parse_errors_still_surface(self):
@@ -185,6 +259,13 @@ class TestTraces:
         assert routes["conflicts"] == []
         assert routes["crossings"] == 0
         assert len(routes["tracks_per_channel"]) == 3
+        assert routes["tracks_per_group"] == {}
+
+    def test_planned_trace_counts_the_tracks_inside_groups(self):
+        generator = FlowchartGenerator()
+        generator.generate("[G: A B C]\nA -> B\nB -> C\nA -> C", debug=True)
+        routes = generator.get_trace().get_stage("routes_planned").data
+        assert routes["tracks_per_group"] == {"G": 1}
 
     def test_planned_trace_has_group_stage_when_there_are_groups(self):
         generator = FlowchartGenerator(direction="LR")

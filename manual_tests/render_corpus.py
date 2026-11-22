@@ -6,19 +6,26 @@ Render the test corpus to text files, for looking at with your own eyes.
     └─────────┘     └──────────────┘     └───────────────────────┘
 
 Every simple (golden) and complex diagram in tests/integration/diagram_corpus.py
-is rendered in each of its directions and written to one .txt file:
+is rendered in each of its directions and written to one .txt file. Diagrams
+with group boxes get folders of their own:
 
     manual_tests/output/simple/<case>-<direction>.txt
     manual_tests/output/complex/<case>-<direction>.txt
+    manual_tests/output/groups_simple/<case>-<direction>.txt
+    manual_tests/output/groups_complex/<case>-<direction>.txt
 
 Each file starts with a short header (case, direction, options, which renderer
-won, the input text), followed by the diagram exactly as ``generate()`` returns
-it. Old .txt files in those folders are removed first, so the output always
-matches the current corpus.
+won, what the checker thinks of the picture, the input text), followed by the
+diagram exactly as ``generate()`` returns it. Old .txt files in those folders
+are removed first, so the output always matches the current corpus.
 
     uv run python manual_tests/render_corpus.py              # everything
-    uv run python manual_tests/render_corpus.py cicd groups  # names containing
-                                                             # "cicd" or "groups"
+    uv run python manual_tests/render_corpus.py cicd tier    # names containing
+                                                             # "cicd" or "tier"
+    uv run python manual_tests/render_corpus.py groups_      # both group suites
+
+A filter is matched against ``<suite>/<case>-<direction>``, so it can select a
+whole suite, one case, or one direction of every case (``-LR``).
 """
 
 import sys
@@ -31,29 +38,47 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from integration.diagram_corpus import (  # noqa: E402
     COMPLEX_CASES,
+    COMPLEX_GROUP_CASES,
     SIMPLE_CASES,
+    SIMPLE_GROUP_CASES,
     Case,
     rendering_id,
     renderings,
 )
 
 from retroflow import FlowchartGenerator  # noqa: E402
+from retroflow.checker import (  # noqa: E402
+    analyze_rendering,
+    expected_edges_of,
+    expected_groups_of,
+)
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "output"
-SUITES: Dict[str, List[Case]] = {"simple": SIMPLE_CASES, "complex": COMPLEX_CASES}
+SUITES: Dict[str, List[Case]] = {
+    "simple": SIMPLE_CASES,
+    "complex": COMPLEX_CASES,
+    "groups_simple": SIMPLE_GROUP_CASES,
+    "groups_complex": COMPLEX_GROUP_CASES,
+}
 RULE = "─" * 72
 
 
 def render_file(case: Case, direction: str) -> Tuple[str, str]:
     """Render one case in one direction; return (file contents, renderer)."""
     generator = FlowchartGenerator(direction=direction, **case.options)
-    diagram = generator.generate(case.text)
+    diagram = generator.generate(case.text, debug=True)
+    base = generator.get_trace().get_canvas_at_stage("boxes_drawn") or []
+    report = analyze_rendering(
+        base, diagram, expected_edges_of(case.text), expected_groups_of(case.text)
+    )
+    verdict = "; ".join(str(issue) for issue in report.issues) or "clean"
     options = ", ".join(f"{k}={v!r}" for k, v in sorted(case.options.items()))
     header = [
         f"case:      {case.name}",
         f"direction: {direction}",
         f"options:   {options or '(defaults)'}",
         f"renderer:  {generator.last_renderer}",
+        f"checker:   {verdict}",
         RULE,
         case.text.strip("\n"),
         RULE,
@@ -78,7 +103,7 @@ def write_suite(
     counts: Dict[str, int] = {}
     for rendering in renderings(cases):
         name = rendering_id(rendering)
-        if filters and not any(f in name for f in filters):
+        if filters and not any(f in f"{suite}/{name}" for f in filters):
             continue
         contents, renderer = render_file(*rendering)
         # open() rather than write_text(): its newline= needs Python 3.10+

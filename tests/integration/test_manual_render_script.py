@@ -29,8 +29,49 @@ def test_filtered_run_writes_matching_files(tmp_path, capsys):
     golden = Path(__file__).parent / "golden" / "diamond-TB.txt"
     contents = (tmp_path / "simple" / "diamond-TB.txt").read_text(encoding="utf-8")
     assert contents.startswith("case:      diamond\ndirection: TB\n")
+    assert "\nrenderer:  classic\nchecker:   clean\n" in contents
     assert contents.endswith(golden.read_text(encoding="utf-8"))
     assert "written to" in capsys.readouterr().out
+
+
+def test_group_diagrams_get_their_own_folders(tmp_path):
+    """Grouped diagrams land in groups_simple/ and groups_complex/."""
+    script = _load_script()
+    assert script.main(["group_pair", "groups_three_tier"], output_dir=tmp_path) == 0
+
+    simple = sorted(p.name for p in (tmp_path / "groups_simple").glob("*.txt"))
+    assert simple == ["group_pair-LR.txt", "group_pair-TB.txt"]
+    busy = sorted(p.name for p in (tmp_path / "groups_complex").glob("*.txt"))
+    assert busy == ["groups_three_tier-LR.txt", "groups_three_tier-TB.txt"]
+    assert not list((tmp_path / "simple").glob("*.txt"))
+    assert not list((tmp_path / "complex").glob("*.txt"))
+
+    golden = Path(__file__).parent / "golden" / "group_pair-LR.txt"
+    contents = (tmp_path / "groups_simple" / "group_pair-LR.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "\nrenderer:  planned\nchecker:   clean\n" in contents
+    assert "[Team: A B]" in contents
+    assert contents.endswith(golden.read_text(encoding="utf-8"))
+
+
+def test_filter_can_select_a_whole_suite(tmp_path):
+    """A filter is matched against <suite>/<case>-<direction>."""
+    script = _load_script()
+    assert script.main(["groups_simple/"], output_dir=tmp_path) == 0
+
+    written = list((tmp_path / "groups_simple").glob("*.txt"))
+    assert len(written) == sum(len(c.directions) for c in script.SIMPLE_GROUP_CASES)
+    assert not list((tmp_path / "groups_complex").glob("*.txt"))
+
+
+def test_header_reports_what_the_checker_found(tmp_path, monkeypatch):
+    """A picture with issues says so in its header instead of 'clean'."""
+    script = _load_script()
+    case = script.SIMPLE_CASES[0]
+    monkeypatch.setattr(script, "expected_edges_of", lambda text: {("A", "Nobody")})
+    contents, _ = script.render_file(case, "TB")
+    assert "\nchecker:   [box_missing]" in contents
 
 
 def test_unfiltered_suite_replaces_stale_files(tmp_path):

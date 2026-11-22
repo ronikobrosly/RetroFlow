@@ -112,7 +112,7 @@ print(flowchart)
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
 - **Title banners**: Optional double-line bordered titles with automatic word wrapping
 - **Horizontal flow**: Left-to-right layout mode for compact linear diagrams
-- **Group boxes**: Experimental, visually cluster related nodes within dashed-border containers with titles
+- **Group boxes**: Visually cluster related nodes within dashed-border containers with titles; borders keep clear of boxes, lines and titles
 
 ## Usage
 
@@ -266,6 +266,9 @@ generator.last_renderer  # "classic"
 generator.generate("A -> B\nB -> C\nC -> D\nA -> C\nA -> D")
 generator.last_renderer  # "planned"
 ```
+
+Diagrams with [group boxes](#group-boxes) are always drawn by the planning renderer,
+because it is the one that routes edges with the group borders in mind.
 
 ### Export to Text File
 
@@ -423,11 +426,9 @@ This produces a horizontal flowchart where nodes flow from left to right, which 
 
 Spacing options are minimums. A gap grows when more lines have to pass through it than fit, and it never shrinks below what you asked for.
 
-### Group Boxes (Experimental)
+### Group Boxes
 
-Group boxes let you visually cluster related nodes together within a labeled container. This is useful for showing subsystems, modules, or logical groupings.
-
-Group boxes work well as long as your diagram is complex, with several groups and fully-connected nodes. 
+Group boxes let you visually cluster related nodes together within a labeled container. This is useful for showing subsystems, modules, or logical groupings. They work in both directions, with every styling option, and on anything from a single grouped node to a large architecture diagram with many groups.
 
 Define groups at the **top** of your input, before edge definitions:
 
@@ -481,6 +482,46 @@ print(result)
 - Group definitions must appear before any edge definitions
 - Nodes within groups are arranged perpendicular to the flow direction (horizontally in TB mode, vertically in LR mode)
 - Neighbouring boxes in a group are joined by a direct line; lines to other boxes cross the dashed border at right angles and never run through a group title
+- Edges between members of the same group stay inside its dashed box; the box grows when they need more room
+- Borders keep their distance: at least two blank cells between a member and its border, and no box, line or arrowhead right beside a border or a title
+
+A line between two members that are not neighbours runs underneath them, inside the group:
+
+```python
+result = generator.generate("""
+[Workers: Split Map Merge]
+
+Split -> Map
+Map -> Merge
+Split -> Merge
+Merge -> Store
+""")
+```
+
+```
+                            Workers
+┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+┆                                                             ┆░
+┆                                                             ┆░
+┆  ┌────────┐             ┌────────┐             ┌────────┐   ┆░
+┆  │ Split  │────────────►│  Map   │────────────►│ Merge  │░  ┆░
+┆  └────┬───┘░            └────────┘░            └─────┬──┘░  ┆░
+┆   ░░░░│░░░░░             ░░░░░░░░░░             ░░░▲░│░░░░  ┆░
+┆       │                                            │ │      ┆░
+┆       └────────────────────────────────────────────┘ │      ┆░
+┆                                                      │      ┆░
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┄┄┄┄┘░
+ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│░░░░░░░░
+                                                       │
+                                                       │
+                                                       │
+                                                       │
+                                                       ▼
+                                                 ┌────────┐
+                                                 │ Store  │░
+                                                 └────────┘░
+                                                  ░░░░░░░░░░
+```
 
 ## Input Format
 
@@ -585,10 +626,20 @@ by reading the rendered text back:
 
 ```bash
 uv run pytest tests/integration/test_complex_diagrams.py    # complex diagrams are clean
+uv run pytest tests/integration/test_group_diagrams.py      # group boxes: borders, buffers, titles
 uv run pytest tests/integration/test_planned_renderer.py    # the planning renderer on its own
 uv run pytest -k goldens                                    # simple diagrams are unchanged
 uv run python tests/integration/diagram_scorecard.py -v     # per-diagram summary
 uv run python tests/integration/diagram_scorecard.py cicd-TB  # show one diagram
+```
+
+To look at the pictures yourself, write the corpus to text files. Diagrams with
+group boxes get folders of their own (`groups_simple/` and `groups_complex/`):
+
+```bash
+uv run python manual_tests/render_corpus.py                 # everything, into manual_tests/output/
+uv run python manual_tests/render_corpus.py groups_simple/  # one folder
+uv run python manual_tests/render_corpus.py cicd            # names containing "cicd"
 ```
 
 ### Run Linting
