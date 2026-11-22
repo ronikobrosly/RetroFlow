@@ -6,6 +6,12 @@ for creating ASCII flowcharts. It orchestrates the parsing, layout, positioning,
 edge routing, and rendering pipeline to produce beautiful ASCII flowcharts from
 simple text descriptions.
 
+Two renderers sit behind ``generate()``. The classic one draws edges one at a
+time and gives small diagrams their familiar look. The planned one
+(``route_planner`` + ``wire_grid``) plans every edge before drawing and is
+used whenever the classic picture would not read back as the graph that was
+asked for. ``checker`` decides between them.
+
 The generator supports:
 - Top-to-bottom (TB) and left-to-right (LR) flow directions
 - Box shadows and rounded corners
@@ -32,12 +38,13 @@ Debug Mode Example:
 
 from typing import Dict, List, Optional, Tuple, Union
 
+from .checker import DiagramReport, analyze_rendering, normalize_name
 from .debug import TracedCanvas
 from .edge_drawing import EdgeDrawer
 from .export import FlowchartExporter
-from .layout import LayoutResult, NetworkXLayout
+from .layout import LayoutResult, NetworkXLayout, NodeLayout
 from .models import ColumnBoundary, GroupBoundary, LayerBoundary
-from .parser import Parser
+from .parser import Parser, ParseResult
 from .positioning import PositionCalculator
 from .renderer import (
     BoxDimensions,
@@ -46,7 +53,27 @@ from .renderer import (
     GroupBoxRenderer,
     TitleRenderer,
 )
+from .route_planner import PlannerOptions, RoutePlanner, assign_ranks
 from .tracer import RenderTrace
+
+# Reason recorded for each wire glyph when tracing (see TracedCanvas).
+WIRE_REASONS = {
+    "─": "wire_horizontal",
+    "│": "wire_vertical",
+    "┌": "wire_corner",
+    "┐": "wire_corner",
+    "└": "wire_corner",
+    "┘": "wire_corner",
+    "├": "wire_junction",
+    "┤": "wire_junction",
+    "┬": "wire_junction",
+    "┴": "wire_junction",
+    "┼": "wire_crossing",
+    "▼": "arrow_down",
+    "▲": "arrow_up",
+    "►": "arrow_right",
+    "◄": "arrow_left",
+}
 
 
 class FlowchartGenerator:
@@ -138,6 +165,9 @@ class FlowchartGenerator:
         # Debug trace storage (populated when debug=True in generate())
         self._last_trace: Optional[RenderTrace] = None
 
+        # Which renderer produced the last diagram: "classic" or "planned".
+        self.last_renderer: Optional[str] = None
+
     def get_trace(self) -> Optional[RenderTrace]:
         """
         Get the trace from the last generate() call with debug=True.
@@ -169,6 +199,25 @@ class FlowchartGenerator:
         Returns:
             ASCII art flowchart as a string.
 
+        How the picture is chosen:
+            Two renderers can draw a diagram, and a checker picks between
+            them by reading the finished picture back::
+
+                input ──► classic renderer ──► reads back clean? ── yes ──► done
+                                                      │ no
+                                                      ▼
+                          planned renderer ──► better than classic? ──► done
+
+            The classic renderer draws each edge on its own. Small diagrams
+            come out exactly as they always have. When its picture would be
+            misleading (fused lines, missing arrowheads, cramped strokes), the
+            planned renderer routes all edges together instead. After the
+            call, ``last_renderer`` says which one was used.
+
+            Diagrams with group boxes always go on to the planned renderer,
+            because only it routes edges with the group borders in mind; the
+            classic picture is kept as the fallback.
+
         Debug Mode:
             When debug=True, a detailed trace is captured that includes:
             - Pipeline stages (parse, layout, positions, etc.)
@@ -183,19 +232,123 @@ class FlowchartGenerator:
             >>> print(trace.summary())
             >>> trace.dump_to_file("debug_trace.txt")
         """
-        # Initialize debug trace if requested
-        trace: Optional[RenderTrace] = None
-        if debug:
-            trace = RenderTrace(input_text=input_text, direction=self.direction)
-            self._last_trace = trace
-        else:
-            self._last_trace = None
+        self._last_trace = None
 
         # Use provided title or fall back to instance title
         effective_title = title if title is not None else self.title
 
         # Parse input (including groups)
         parse_result = self.parser.parse_with_groups(input_text)
+        expected_edges = {
+            (normalize_name(source), normalize_name(target))
+            for source, target in parse_result.connections
+        }
+
+        def new_trace() -> Optional[RenderTrace]:
+            if not debug:
+                return None
+            return RenderTrace(input_text=input_text, direction=self.direction)
+
+        # The classic renderer goes first. Whatever it draws cleanly is
+        # returned exactly as it always was, unless the diagram has groups:
+        # the classic renderer knows nothing about group borders, so its
+        # picture is then only the fallback for the planned one.
+        grouped = bool(parse_result.groups)
+        classic_trace = new_trace()
+        classic_output, classic_base = self._render_classic(
+            parse_result, effective_title, classic_trace
+        )
+        classic_report = analyze_rendering(
+            classic_base, classic_output, expected_edges, parse_result.groups
+        )
+        if not classic_report.issues and not grouped:
+            return self._finish_generate(
+                "classic", classic_output, classic_trace, classic_report, None
+            )
+
+        # Otherwise the diagram is planned edge by edge before it is drawn.
+        # The planned picture only replaces the classic one when it checks
+        # out better, so an unexpected failure in the planner must never cost
+        # the caller the diagram they would have got anyway.
+        planned_trace = new_trace()
+        try:
+            planned_output, planned_base = self._render_planned(
+                parse_result, effective_title, planned_trace
+            )
+        except Exception as error:  # noqa: BLE001 - see comment above
+            return self._finish_generate(
+                "classic",
+                classic_output,
+                classic_trace,
+                classic_report,
+                None,
+                planner_error=f"{type(error).__name__}: {error}",
+            )
+        planned_report = analyze_rendering(
+            planned_base, planned_output, expected_edges, parse_result.groups
+        )
+
+        def badness(report: DiagramReport) -> Tuple[int, int]:
+            return (len(report.errors), len(report.warnings))
+
+        planned_wins = badness(planned_report) < badness(classic_report) or (
+            grouped and badness(planned_report) == badness(classic_report)
+        )
+        if planned_wins:
+            return self._finish_generate(
+                "planned", planned_output, planned_trace, planned_report, classic_report
+            )
+        return self._finish_generate(
+            "classic", classic_output, classic_trace, classic_report, planned_report
+        )
+
+    def _finish_generate(
+        self,
+        renderer: str,
+        output: str,
+        trace: Optional[RenderTrace],
+        report: DiagramReport,
+        other_report: Optional[DiagramReport],
+        planner_error: Optional[str] = None,
+    ) -> str:
+        """Record which renderer won (debug mode only) and return its output."""
+        self.last_renderer = renderer
+        if trace is not None:
+            trace.add_stage(
+                "renderer_selected",
+                {
+                    "renderer": renderer,
+                    "issues": dict(report.counts()),
+                    "other_renderer_issues": (
+                        dict(other_report.counts()) if other_report else None
+                    ),
+                    "planner_error": planner_error,
+                },
+            )
+            self._last_trace = trace
+        return output
+
+    def _render_classic(
+        self,
+        parse_result: ParseResult,
+        effective_title: Optional[str],
+        trace: Optional[RenderTrace],
+    ) -> Tuple[str, List[str]]:
+        """
+        Draw the diagram with the original edge drawer.
+
+        Each edge is routed and painted on its own. This is what produces the
+        familiar look of small diagrams; busy diagrams can come out with
+        fused or broken lines, which is why ``generate`` checks the result.
+
+        Args:
+            parse_result: Parsed connections and groups.
+            effective_title: Title to draw above the diagram, if any.
+            trace: Trace to fill in, or None when not in debug mode.
+
+        Returns:
+            (finished diagram, canvas rows as they were before edges).
+        """
         connections = parse_result.connections
         groups = parse_result.groups
 
@@ -492,6 +645,7 @@ class FlowchartGenerator:
             canvas.set_source("BoxRenderer.draw_box")
         self._draw_boxes(canvas, box_dimensions, box_positions, layout_result)
 
+        base_lines = self._snapshot(canvas)
         if trace:
             # Get underlying canvas for snapshot
             underlying = canvas._canvas if isinstance(canvas, TracedCanvas) else canvas
@@ -562,7 +716,195 @@ class FlowchartGenerator:
                     underlying,
                 )
 
-        return canvas.render()
+        return canvas.render(), base_lines
+
+    def _render_planned(
+        self,
+        parse_result: ParseResult,
+        effective_title: Optional[str],
+        trace: Optional[RenderTrace],
+    ) -> Tuple[str, List[str]]:
+        """
+        Draw the diagram with every edge planned before anything is painted.
+
+            ranks ──► lanes ──► ports ──► tracks ──► wire grid ──► glyphs
+
+        Ports, lanes and tracks are handed out so that unrelated edges never
+        share a cell, and each glyph is derived from the lines that actually
+        pass through it (see ``route_planner`` and ``wire_grid``).
+
+        Args:
+            parse_result: Parsed connections and groups.
+            effective_title: Title to draw above the diagram, if any.
+            trace: Trace to fill in, or None when not in debug mode.
+
+        Returns:
+            (finished diagram, canvas rows as they were before edges).
+        """
+        connections = parse_result.connections
+        groups = parse_result.groups
+        if trace:
+            trace.add_stage(
+                "parse",
+                {
+                    "connections": connections,
+                    "groups": [(g.name, g.members) for g in groups],
+                },
+            )
+
+        layers = assign_ranks(connections, groups, self.layout_engine)
+        if trace:
+            trace.add_stage("layout", {"layers": layers})
+
+        nodes = LayoutResult(
+            nodes={name: NodeLayout(name=name) for layer in layers for name in layer}
+        )
+        natural_dimensions = self.position_calculator.calculate_all_box_dimensions(
+            nodes
+        )
+        planner = RoutePlanner(
+            PlannerOptions(
+                direction=self.direction,
+                horizontal_spacing=self.horizontal_spacing,
+                vertical_spacing=self.vertical_spacing,
+                shadow=self.shadow,
+            )
+        )
+        plan = planner.plan(connections, groups, layers, natural_dimensions)
+
+        if trace:
+            trace.add_stage(
+                "dimensions",
+                {
+                    "box_dimensions": {
+                        name: (dims.width, dims.height)
+                        for name, dims in plan.box_dimensions.items()
+                    },
+                },
+            )
+            trace.add_stage(
+                "routes_planned",
+                {
+                    "layers": plan.layers,
+                    "tracks_per_channel": plan.tracks_per_channel,
+                    "tracks_per_group": plan.tracks_per_group,
+                    "crossings": plan.grid.crossing_count(),
+                    "conflicts": [str(c) for c in plan.grid.conflicts],
+                },
+            )
+
+        # Centre the title over the diagram, or the diagram under the title.
+        title_height = 0
+        title_width = 0
+        diagram_x_offset = 0
+        title_x_offset = 0
+        canvas_width = plan.width
+        if effective_title:
+            title_width, title_height = self.title_renderer.calculate_title_dimensions(
+                effective_title
+            )
+            title_height += 2  # Add spacing below title
+            if title_width > canvas_width:
+                diagram_x_offset = (title_width - canvas_width) // 2
+                canvas_width = title_width
+            else:
+                title_x_offset = (canvas_width - title_width) // 2
+
+        box_positions = {
+            name: (x + diagram_x_offset, y + title_height)
+            for name, (x, y) in plan.box_positions.items()
+        }
+        if trace:
+            trace.add_stage("positions", {"box_positions": dict(box_positions)})
+
+        canvas: Union[Canvas, TracedCanvas] = Canvas(
+            canvas_width + 2, plan.height + title_height + 2
+        )
+        if trace:
+            trace.add_stage(
+                "canvas_created",
+                {
+                    "canvas_width": canvas.width,
+                    "canvas_height": canvas.height,
+                    "title_height": title_height,
+                },
+                canvas,
+            )
+            canvas = TracedCanvas(canvas, trace)
+
+        if effective_title:
+            if isinstance(canvas, TracedCanvas):
+                canvas.set_source("TitleRenderer.draw_title")
+            self.title_renderer.draw_title(
+                canvas, title_x_offset, 0, effective_title, title_width
+            )
+
+        if plan.group_boundaries:
+            if isinstance(canvas, TracedCanvas):
+                canvas.set_source("GroupBoxRenderer.draw_group_box")
+            for group in plan.group_boundaries:
+                self.group_box_renderer.draw_group_box(
+                    canvas,
+                    group.x + diagram_x_offset,
+                    group.y + title_height,
+                    group.width,
+                    group.height,
+                    group.name,
+                    title_x=plan.group_title_x[group.name] + diagram_x_offset,
+                )
+            if trace:
+                trace.add_stage(
+                    "groups_drawn",
+                    {"num_groups": len(plan.group_boundaries)},
+                    self._underlying(canvas),
+                )
+
+        if isinstance(canvas, TracedCanvas):
+            canvas.set_source("BoxRenderer.draw_box")
+        for layer in plan.layers:
+            for name in layer:
+                x, y = box_positions[name]
+                self.box_renderer.draw_box(canvas, x, y, plan.box_dimensions[name])
+
+        base_lines = self._snapshot(canvas)
+        if trace:
+            trace.add_stage(
+                "boxes_drawn",
+                {"num_boxes": len(box_positions)},
+                self._underlying(canvas),
+            )
+
+        if isinstance(canvas, TracedCanvas):
+            canvas.set_source("RoutePlanner.wire_grid")
+        for (x, y), glyph in plan.port_marks.items():
+            canvas.set(x + diagram_x_offset, y + title_height, glyph, "exit_port")
+        for (x, y), glyph in plan.grid.cells():
+            canvas.set(
+                x + diagram_x_offset,
+                y + title_height,
+                glyph,
+                WIRE_REASONS.get(glyph, "wire"),
+            )
+
+        if trace:
+            trace.add_stage(
+                "edges_drawn",
+                {"num_edges": len(set(connections))},
+                self._underlying(canvas),
+            )
+
+        return canvas.render(), base_lines
+
+    @staticmethod
+    def _underlying(canvas: Union[Canvas, TracedCanvas]) -> Canvas:
+        """The plain canvas behind a possibly traced one."""
+        return canvas._canvas if isinstance(canvas, TracedCanvas) else canvas
+
+    @classmethod
+    def _snapshot(cls, canvas: Union[Canvas, TracedCanvas]) -> List[str]:
+        """The canvas as rows of text, as it is right now."""
+        rendered = cls._underlying(canvas).render()
+        return rendered.split("\n") if rendered else []
 
     def save_txt(
         self, input_text: str, filename: str, boxes_only: bool = False
