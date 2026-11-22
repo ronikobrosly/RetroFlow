@@ -83,6 +83,8 @@ The `publish.yml` workflow will automatically:
 - **PNG export**: Save high-resolution PNG images with customizable fonts
 - **Intelligent layout**: Automatic node positioning using NetworkX with barycenter heuristic
 - **Smart edge routing**: Edges automatically route around intermediate boxes to avoid visual overlap
+- **Planned routing for complex diagrams**: Busy diagrams are routed as a whole (ports, lanes, tracks) so unrelated edges never share a cell
+- **Self-checking output**: A checker reads every rendering back and decides which renderer's picture is returned
 - **Cycle detection**: Handles cyclic graphs gracefully with back-edge routing
 - **Customizable**: Adjust text width, box sizes, spacing, shadows, and fonts
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
@@ -107,14 +109,30 @@ retroflow/
 │   ├── router.py            # Edge routing utilities (ports, waypoints)
 │   ├── models.py            # Data models (LayerBoundary, ColumnBoundary)
 │   ├── positioning.py       # Position calculation for nodes
-│   ├── edge_drawing.py      # Edge rendering for TB and LR modes
+│   ├── edge_drawing.py      # Classic edge rendering for TB and LR modes
+│   ├── route_planner.py     # Planned renderer: ranks, lanes, ports, positions
+│   ├── channel_router.py    # Track assignment for the gap between two layers
+│   ├── wire_grid.py         # Glyphs computed from the lines in each cell
+│   ├── checker.py           # Reads a rendering back; gate between renderers
 │   ├── export.py            # PNG and text file export functionality
 │   ├── tracer.py            # Debug tracing infrastructure (RenderTrace, etc.)
 │   ├── debug.py             # Debug utilities (TracedCanvas, visual_diff, etc.)
 │   └── py.typed             # PEP 561 type marker
 ├── tests/
 │   ├── conftest.py          # Shared pytest fixtures
-│   └── ...                  # Test modules
+│   ├── unit/                # One module per source module
+│   └── integration/
+│       ├── diagram_corpus.py            # Simple, complex and random diagrams
+│       ├── diagram_checker.py           # check_diagram / check_planned_diagram
+│       ├── diagram_scorecard.py         # Clean/defect summary for the corpus
+│       ├── golden/                      # Pinned output of the simple diagrams
+│       ├── test_simple_diagram_goldens.py
+│       ├── test_complex_diagrams.py     # Complex diagrams via generate()
+│       ├── test_planned_renderer.py     # Planned renderer on its own + fuzzing
+│       └── test_diagram_checker.py      # The checker, on hand-drawn pictures
+├── manual_tests/
+│   ├── render_corpus.py     # Writes every simple + complex diagram to .txt
+│   └── output/              # Generated files (gitignored)
 ├── codecov.yml              # Coverage threshold config (90%)
 ├── pyproject.toml           # Package metadata and dependencies
 ├── README.md                # User documentation
@@ -125,17 +143,142 @@ retroflow/
 
 | File | Purpose |
 |------|---------|
-| `generator.py` | Main `FlowchartGenerator` class - orchestrates parsing, layout, positioning, edge drawing, group rendering, and export |
+| `generator.py` | Main `FlowchartGenerator` class - runs the classic renderer, checks the result, falls back on the planned renderer; also export |
 | `parser.py` | Parses `A -> B` text syntax into connection tuples; also parses group definitions (`[GROUP: nodes]`) |
 | `layout.py` | `NetworkXLayout` class using networkx for graph representation, cycle detection, topological sorting, and barycenter-based node ordering. `SugiyamaLayout` is an alias for backwards compatibility. |
 | `renderer.py` | `Canvas` for 2D character grid, `BoxRenderer` for Unicode box drawing with shadows, `GroupBoxRenderer` for dashed group boxes, `LineRenderer` for edge drawing utilities |
 | `router.py` | `EdgeRouter` for port allocation and orthogonal edge routing (utility module for future use) |
 | `models.py` | Data models for layout boundaries (`LayerBoundary`, `ColumnBoundary`) and group definitions (`GroupDefinition`, `GroupBoundary`) |
 | `positioning.py` | `PositionCalculator` class for calculating node positions, layer/column boundaries, port positions, and group-aware positioning |
-| `edge_drawing.py` | `EdgeDrawer` class for rendering forward and back edges in TB and LR modes |
+| `edge_drawing.py` | `EdgeDrawer` class for rendering forward and back edges in TB and LR modes (classic renderer) |
+| `route_planner.py` | `RoutePlanner` plans a whole diagram as data (`RoutePlan`): layers, lanes, order, ports, hooks, positions, tracks, wires. Also `assign_ranks`, `spread_offsets`, `settle` |
+| `channel_router.py` | `route_channel` gives every connection in one gap its own track; splits pieces with a jog when ordering rules contradict |
+| `wire_grid.py` | `WireGrid` stores arms per cell per net and looks glyphs up from them; reports conflicts instead of drawing misleading junctions |
+| `checker.py` | `analyze_rendering` reads a finished picture back into edges and reports `Issue`s (`DiagramReport`) |
 | `export.py` | `FlowchartExporter` class for PNG and text file export with font handling |
 | `tracer.py` | Debug tracing infrastructure - `RenderTrace`, `PipelineStage`, `CharacterPlacement` for capturing rendering decisions |
 | `debug.py` | Debug utilities - `TracedCanvas` wrapper, `visual_diff`, `CanvasInspector` for debugging and analysis |
+
+
+## Two Renderers and a Gate
+
+```
+input ──► classic renderer ──► checker: clean? ── yes ──► returned unchanged
+                                      │ no
+                                      ▼
+          planned renderer ──► checker: better than classic? ──► returned
+```
+
+`FlowchartGenerator.generate()` always runs the **classic** renderer first
+(`_render_classic`: `PositionCalculator` + `EdgeDrawer`). It draws one edge at
+a time with the canvas as its only memory, which gives small diagrams their
+familiar look and is why busy diagrams used to come out with fused lines.
+
+The result is read back by `checker.analyze_rendering`. If it has no errors
+and no warnings it is returned as is, so **anything the classic renderer draws
+cleanly is byte-identical to before** (32 golden files in
+`tests/integration/golden/` pin this). Otherwise the **planned** renderer
+(`_render_planned`: `RoutePlanner` + `WireGrid`) draws the diagram, and its
+picture is used when it checks out better: fewer errors, then fewer warnings.
+A crash inside the planner also falls back to the classic picture.
+`generator.last_renderer` is `"classic"` or `"planned"` after each call.
+
+### The checker (`checker.py`)
+
+The checker compares the canvas after boxes were drawn with the finished
+canvas, so everything that differs is edge drawing. It follows line glyphs by
+their arms and reads off which boxes each line connects. It never looks at
+renderer internals.
+
+| Code | Meaning |
+|------|---------|
+| `phantom_edge` / `missing_edge` | The picture shows an edge that is not in the input / an input edge cannot be traced |
+| `stray_line`, `dangling_line`, `dangling_port` | A line without a source or arrowhead, or an arm reaching toward nothing |
+| `floating_arrow`, `arrow_no_tail`, `arrow_hit_sideways` | Arrowhead defects |
+| `box_missing`, `box_damaged`, `group_border_damaged` | Boxes, titles or group borders overwritten |
+| `adjacent_lines` (warning) | Unrelated vertical strokes in touching columns |
+
+### The planned renderer (`route_planner.py`)
+
+```
+ranks ──► lanes ──► order ──► ports ──► positions ──► tracks ──► wire grid
+└──────────────────── pure data, no canvas ───────────────────┘
+```
+
+Five rules, each of which the tests check directly:
+
+1. A glyph is computed from the arms in its cell; arms only come from route segments (`WireGrid`).
+2. Edges share a line only as a *star* (one source fanning out, or several sources into one target), so a shared line never implies an edge that was not asked for.
+3. One allocator per box side hands out ports for all edges on that side; boxes grow when a side is too short.
+4. Every segment lies in space reserved for it: a lane beside the boxes it passes, a track in the channel between two layers. The canvas is sized from the routes.
+5. Every ordering is total and derived from input order (no iteration over sets of names).
+
+Everything is planned in **flow coordinates** (`flow` along the diagram,
+`cross` across it), so LR is the same code as TB with the axes swapped. Only
+`_Metrics` (pitches and gaps) and the final `_cell()` conversion differ.
+
+How an edge attaches to a box (`_Edge.src_mode` / `dst_mode`):
+
+| Mode | Meaning | Used for |
+|------|---------|----------|
+| `F` | Port on the side facing the flow, ending in a channel | All forward edges in TB; edges between neighbouring columns in LR |
+| `X` | Hook from a lane right beside the box into a side that runs along the flow | Back-edge and self-loop targets in TB (`┌───►│ box │`); skip and back edges in LR (top and bottom borders) |
+| `A` | Arc: re-enters on the side it left from, arrowhead pointing against the flow | Edges between non-neighbouring boxes of one group; self loops inside groups |
+| `D` | Direct line between two neighbouring boxes of one layer | Neighbouring group members |
+
+Other things worth knowing before changing the planner:
+
+- **TB gives every edge its own port and arrowhead; LR shares lines.** A compact LR box has one row per facing side, so adjacent-column edges are bundled into stars and everything else goes to the top and bottom borders. A box never grows taller unless it is inside a group (where its top and bottom face other members).
+- **Lanes** (`_Lane`) are one layer's worth of an edge travelling past boxes. Hooked lanes must stay adjacent to their box (`_place_anchored_lanes`); free lanes follow barycenter sweeps.
+- **LR arcs pick a side** (`_choose_lane_sides`): forward skips default to below the row, back edges to above, and an arc flips sides when that avoids interleaving with arcs already placed.
+- **Cross positions** (`_assign_cross_positions`) use `settle()` (pool-adjacent-violators): boxes line up middle-to-middle with the boxes they connect to, lanes follow lanes, and the last pass works outward from the widest layer so symmetric diagrams stay symmetric. `_straighten_ports` then slides lone ports to make lines straight.
+- **Channels** (`channel_router.route_channel`): pieces whose spans overlap get different tracks; a stub above another piece's stub forces their order; contradictory orders are broken by splitting a piece with a jog; remaining freedom goes to the order with fewer crossings. A same-net four-way meeting is split into two tees, because `┼` must always mean "crossing".
+- **Gaps keep their classic size** when their tracks fit and grow only for extra tracks (`_assign_flow_positions`), so planned diagrams look like classic ones where nothing is contested.
+- **Groups**: all members of a group share a layer (`assign_ranks` collapses groups first) and stay contiguous. Grouped boxes only use `F`, `A` and `D`. In TB the title is placed beside the lines entering the group from above (`_group_title_start`), and the group is widened if no gap is long enough.
+
+### Debugging a diagram
+
+```bash
+uv run python tests/integration/diagram_scorecard.py -v      # every corpus diagram
+uv run python tests/integration/diagram_scorecard.py cicd-TB # one diagram + issues
+```
+
+To look at the pictures themselves, render the corpus to text files:
+
+```bash
+uv run python manual_tests/render_corpus.py              # all simple + complex
+uv run python manual_tests/render_corpus.py cicd groups  # names containing either
+```
+
+Files land in `manual_tests/output/simple/` and `manual_tests/output/complex/`,
+one per diagram and direction (`<case>-<direction>.txt`). Each one starts with a
+header (case, direction, options, which renderer won, the input text) followed
+by the diagram exactly as `generate()` returns it. An unfiltered run deletes the
+old files first. The output folder is gitignored; the script has a smoke test
+in `tests/integration/test_manual_render_script.py`.
+
+```python
+generator = FlowchartGenerator(direction="LR")
+generator.generate(text, debug=True)
+generator.last_renderer                      # which renderer won
+trace = generator.get_trace()
+trace.get_stage("renderer_selected").data    # issues of both renderers
+trace.get_stage("routes_planned").data       # layers, tracks per channel, conflicts
+
+# Force the planned renderer, bypassing the gate (tests do this):
+parsed = generator.parser.parse_with_groups(text)
+output, boxes_only = generator._render_planned(parsed, None, None)
+```
+
+`tests/integration/diagram_checker.py` has `check_diagram` (through the gate)
+and `check_planned_diagram` (planned renderer only); both return a
+`DiagramReport` whose `explain()` prints the issues above the picture.
+
+### Tests for diagrams
+
+- `diagram_corpus.py` holds every diagram: `SIMPLE_CASES` (pinned by goldens), `COMPLEX_CASES` (graph families, cycles, real-world diagrams, an options matrix, groups) and `RANDOM_CASES` (seeded, some with random options and groups). Every case runs in TB and LR. **Add new shapes here**; all test modules pick them up.
+- A new diagram that must stay byte-identical goes in `SIMPLE_CASES`; regenerate with `RETROFLOW_UPDATE_GOLDENS=1 uv run pytest -k goldens` and review the diff.
+- `test_planned_renderer.py` also fuzzes the planner with 300 seeded random graphs, groups and option sets. Use only `Random.random()` in generators so a seed means the same diagram on every Python version.
 
 
 ## Debug Tracing System
@@ -215,8 +358,14 @@ The trace captures these stages:
 | `positions` | Canvas coordinates calculated for each box |
 | `canvas_created` | Initial empty canvas created |
 | `boxes_drawn` | All node boxes rendered |
-| `forward_edges_drawn` | Forward edges rendered (normal flow) |
-| `back_edges_drawn` | Back edges rendered (cycles) |
+| `forward_edges_drawn` | Forward edges rendered (normal flow; classic renderer) |
+| `back_edges_drawn` | Back edges rendered (cycles; classic renderer) |
+| `routes_planned` | Layers, tracks per channel, crossings and wire conflicts (planned renderer) |
+| `edges_drawn` | All wires painted (planned renderer) |
+| `renderer_selected` | Which renderer's picture was returned, and the checker's issue counts for both |
+
+The trace returned by `get_trace()` always belongs to the renderer whose
+picture was returned.
 
 ### Character Placement Reasons
 
@@ -235,6 +384,8 @@ Each character placement includes a reason string. Common reasons:
 | `arrow_down` | Placing ▼ arrow |
 | `source_exit_port` | Marking box exit point with ┬ |
 | `fanout_junction` | Fan-out junction point |
+| `wire_horizontal`, `wire_vertical`, `wire_corner`, `wire_junction`, `wire_crossing` | Glyphs painted from the wire grid (planned renderer) |
+| `exit_port` | Port mark where a planned line leaves a box |
 
 ### TracedCanvas
 
@@ -414,5 +565,6 @@ Nodes are arranged **perpendicular to the flow direction** within groups, making
 | `parser.py` | `parse_with_groups()` method, group syntax parsing, multi-word node matching |
 | `positioning.py` | `calculate_group_aware_positions()`, `calculate_group_boundaries()`, `resolve_group_overlaps()` |
 | `renderer.py` | `GroupBoxRenderer` class, `DASHED_BOX_CHARS` constants |
-| `generator.py` | Group orchestration in `generate()`, `_draw_groups()` method |
+| `generator.py` | Group orchestration in `_render_classic()` / `_render_planned()`, `_draw_groups()` method |
+| `route_planner.py` | Planned renderer: `assign_ranks()` (groups share a layer), group extents, title placement, direct lines and arcs inside groups |
 | `models.py` | `GroupDefinition`, `GroupBoundary` dataclasses |

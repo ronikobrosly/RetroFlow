@@ -927,9 +927,14 @@ class EdgeDrawer:
             # then go straight to target
             if goes_right:
                 if src_port_y == tgt_port_y:
-                    # Same height - direct horizontal line
+                    # Same height - direct horizontal line. The line starts on
+                    # the cell right after the border (the shadow cell when
+                    # shadows are on), so it visibly attaches to the source.
                     self._draw_horizontal_line(
-                        canvas, src_exit_x, tgt_entry_x - 1, src_port_y
+                        canvas,
+                        src_x + src_dims.width - 1,
+                        tgt_entry_x - 1,
+                        src_port_y,
                     )
                     canvas.set(tgt_entry_x - 1, tgt_port_y, ARROW_CHARS["right"])
                 else:
@@ -1281,6 +1286,39 @@ class EdgeDrawer:
                 canvas.set(x, y, LINE_CHARS["cross"], "upgrade_tee_corner_to_cross")
             # else: tee already has all needed segments, no change
 
+    @staticmethod
+    def _sort_back_edges(
+        layout_result: LayoutResult, node_layer: Dict[str, int]
+    ) -> List[Tuple[str, str]]:
+        """
+        Order back edges for drawing: deepest source layer first.
+
+        ``layout_result.back_edges`` is a set, so its iteration order follows
+        Python's per-process string hashing. Ties between edges whose sources
+        share a layer are therefore broken by the order the edges were written
+        in the input, which makes the ordering total and the picture the same
+        in every process.
+
+        Args:
+            layout_result: The layout result with back edge information.
+            node_layer: Mapping of node name to layer index.
+
+        Returns:
+            The back edges in a deterministic drawing order.
+        """
+        input_order: Dict[Tuple[str, str], int] = {}
+        for index, edge in enumerate(layout_result.edges):
+            input_order.setdefault(edge, index)
+
+        return sorted(
+            layout_result.back_edges,
+            key=lambda e: (
+                -node_layer.get(e[0], 0),
+                input_order.get(e, len(input_order)),
+                e,
+            ),
+        )
+
     def draw_back_edges(
         self,
         canvas: Canvas,
@@ -1312,11 +1350,7 @@ class EdgeDrawer:
         # Sort back edges by source layer (draw deeper ones first)
         node_layer = {name: node.layer for name, node in layout_result.nodes.items()}
 
-        sorted_back_edges = sorted(
-            layout_result.back_edges,
-            key=lambda e: node_layer.get(e[0], 0),
-            reverse=True,
-        )
+        sorted_back_edges = self._sort_back_edges(layout_result, node_layer)
 
         # Track entries per target for offset
         target_entry_count: Dict[str, int] = {}
@@ -2065,11 +2099,7 @@ class EdgeDrawer:
         # Sort back edges by source layer (draw deeper ones first)
         node_layer = {name: node.layer for name, node in layout_result.nodes.items()}
 
-        sorted_back_edges = sorted(
-            layout_result.back_edges,
-            key=lambda e: node_layer.get(e[0], 0),
-            reverse=True,
-        )
+        sorted_back_edges = self._sort_back_edges(layout_result, node_layer)
 
         # Track entries per target for offset
         target_entry_count: Dict[str, int] = {}

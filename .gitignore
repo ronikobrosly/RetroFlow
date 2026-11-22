@@ -239,3 +239,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Manual inspection output (manual_tests/render_corpus.py)
+manual_tests/output/

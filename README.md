@@ -40,32 +40,21 @@ This is a project to help engineers, researchers, project managers, and others c
                                        ╚════════╝
 
 
-
-
- ┌──────────────────────────────────────────────────────────────────────────────────────┐
- │                                                                                      │
- │                                                                                      │
- │                                                 ┌────────────────────────────────────┐
- │                                                 │                                    │
- │                                                 │                                    │
- │                        ┌────────────────────────┼───────────┐                        │
- │                        │                        │           │                        │
- │                        │                        │           │                        │
- │┌───────────────────────┼───────────┐            │           │                        │
- ││                       │           │            │           │                        │
- ││                       │           │            │           │                        │
- ││                       │           │            │           │                        │
- ▼▼                       ▼           │            ▼           │                        │
-┌──────────┐             ┌──────────┐ │           ┌──────────┐ │           ┌──────────┐ │
-│          ┤────────────►│          ┤─┘           │          ┤─┘           │          ┤─┘
-│  Node A  ┤──────┐      │  Node B  ┤────────────►│  Node C  ┤──────┌─────►│  Node D  │░
-│          │░     │      │          │░            │          │░     │      │          │░
-└──────────┘░     │      └──────────┘░            └──────────┘░     │      └──────────┘░
- ░░░░░░░░░░░░     │       ░░░░░░░░░░░░             ░░░░░░░░░░░░     │       ░░░░░░░░░░░░
-                  │                                                 │
-                  │                                                 │
-                  │                                                 │
-                  └─────────────────────────────────────────────────┘
+    ┌────────────────────────────────────────────────────────────────────────────┐
+    │                                                                            │
+    │ ┌──────────────────────┐                                                   │
+    │ │                      │             ┌──────────┐                          │
+    │ │                      │ ┌───────────┘          │                          │
+    │ │                      │ │                      │ ┌──────────────────────┐ │
+    ▼ ▼                      │ ▼                      │ ▼                      │ │
+┌──────────┐             ┌───┴──────┐             ┌───┴──────┐             ┌───┴─┴────┐
+│          │░            │          │░            │          │░            │          │░
+│  Node A  │────────────►│  Node B  │────────────►│  Node C  │────────────►│  Node D  │░
+│          │░            │          │░            │          │░            │          │░
+└─────┬────┘░            └──────────┘░            └──────────┘░            └──────────┘░
+ ░░░░░│░░░░░░             ░░░░░░░░░░░░             ░░░░░░░░░░░░             ░░░░░▲░░░░░░
+      │                                                                          │
+      └──────────────────────────────────────────────────────────────────────────┘
 ```
 
 
@@ -116,6 +105,8 @@ print(flowchart)
 - **PNG export**: Save high-resolution PNG images with customizable fonts
 - **Intelligent layout**: Automatic node positioning using NetworkX with barycenter heuristic
 - **Smart edge routing**: Edges automatically route around intermediate boxes to avoid visual overlap
+- **Clean complex diagrams**: Busy diagrams are planned as a whole, so every edge gets its own port, lane and track and unrelated lines never fuse
+- **Self-checking output**: Every diagram is read back before it is returned, to make sure the picture shows exactly the edges you typed
 - **Cycle detection**: Handles cyclic graphs gracefully with back-edge routing
 - **Customizable**: Adjust text width, box sizes, spacing, shadows, and fonts
 - **Unicode box-drawing**: Beautiful boxes with optional shadow effects
@@ -166,6 +157,114 @@ result = generator.generate("""
     Check -> Done
 """)
 print(result)
+```
+
+### Complex Diagrams
+
+Diagrams with many boxes and many edges need no special handling. Skip edges,
+loops, fan-outs and fan-ins can be mixed freely:
+
+```python
+generator = FlowchartGenerator()
+
+result = generator.generate("""
+    Client -> Gateway
+    Gateway -> Auth
+    Gateway -> Orders
+    Gateway -> Billing
+    Auth -> Users DB
+    Orders -> Orders DB
+    Orders -> Billing
+    Billing -> Ledger
+    Billing -> Gateway
+    Client -> Orders
+""")
+print(result)
+```
+
+```
+                       ┌────────┐
+                       │ Client │░
+                       └───┬─┬──┘░
+                        ░░░│░│░░░░
+                           │ │
+                           │ │
+                           │ └─────────────────┐
+                           ▼                   │
+                       ┌─────────┐             │
+┌─────────────────────►│ Gateway │░            │
+│                      └──┬─┬─┬──┘░            │
+│                       ░░│░│░│░░░░            │
+│                         │ │ │                │
+│         ┌───────────────┘ │ └──────────────┐ │
+│         │                 └────┐           │ │
+│         ▼                      │           ▼ ▼
+│    ┌────────┐                  │       ┌────────┐
+│    │  Auth  │░                 │       │ Orders │░
+│    └────┬───┘░                 │       └───┬─┬──┘░
+│     ░░░░│░░░░░                 │        ░░░│░│░░░░
+│         │                      │           │ │
+│         │                      │           │ │
+│         │                      │ ┌─────────┘ └───────────┐
+│         ▼                      ▼ ▼                       ▼
+│   ┌──────────┐             ┌─────────┐             ┌───────────┐
+│   │ Users DB │░            │ Billing │░            │ Orders DB │░
+│   └──────────┘░            └───┬─┬───┘░            └───────────┘░
+│    ░░░░░░░░░░░░             ░░░│░│░░░░░             ░░░░░░░░░░░░░
+│                                │ │
+│                                │ │
+└────────────────────────────────┘ │
+                                   ▼
+                             ┌────────┐
+                             │ Ledger │░
+                             └────────┘░
+                              ░░░░░░░░░░
+```
+
+How to read a busy diagram:
+
+- A line belongs to the box whose border it leaves through (`┬`) and to the box its arrowhead touches.
+- `┼` is two lines crossing; they do not connect. Lines only join at `├ ┤ ┬ ┴`.
+- In top-to-bottom diagrams every edge has its own arrowhead. In left-to-right diagrams edges that fan out of one box, or into one box, share a line.
+- An edge that skips a layer runs in its own lane beside the boxes it passes. An edge that points backwards enters the side of its target (top-to-bottom) or arcs over the row (left-to-right).
+- Boxes grow wider when they need room for more lines, and the gaps between layers grow when more lines have to pass through them.
+
+```python
+generator = FlowchartGenerator(direction="LR")
+result = generator.generate("""
+    Draft -> Review
+    Review -> Approved
+    Approved -> Merged
+    Draft -> Approved
+    Review -> Draft
+    Merged -> Draft
+""")
+```
+
+```
+    ┌───────────────────────────────────────────────────────────────────────┐
+    │                                                                       │
+    │ ┌─────────────────────┐                                               │
+    ▼ ▼                     │                                               │
+┌────────┐             ┌────┴───┐             ┌──────────┐             ┌────┴───┐
+│ Draft  │────────────►│ Review │────────────►│ Approved │────────────►│ Merged │░
+└────┬───┘░            └────────┘░            └──────────┘░            └────────┘░
+ ░░░░│░░░░░             ░░░░░░░░░░             ░░░░░▲░░░░░░             ░░░░░░░░░░
+     │                                              │
+     └──────────────────────────────────────────────┘
+```
+
+**Two renderers, one result.** Small diagrams are drawn by the classic renderer and
+look exactly as they always have. Before a diagram is returned it is read back, the way
+a person would read it; if the picture would be misleading or cramped, the diagram is
+drawn again by a renderer that plans all edges together. You can see which one was used:
+
+```python
+generator.generate("A -> B\nB -> C")
+generator.last_renderer  # "classic"
+
+generator.generate("A -> B\nB -> C\nC -> D\nA -> C\nA -> D")
+generator.last_renderer  # "planned"
 ```
 
 ### Export to Text File
@@ -223,8 +322,10 @@ generator = FlowchartGenerator(
     max_text_width=22,  # Max width for text inside boxes before wrapping (default: 22)
     min_box_width=10,  # Minimum box width (default: 10)
     horizontal_spacing=12,  # Space between boxes horizontally (default: 12)
-    vertical_spacing=6,  # Space between boxes vertically (default: 6)
+    vertical_spacing=3,  # Space between boxes vertically (default: 3)
     shadow=True,  # Whether to draw box shadows (default: True)
+    rounded=False,  # Rounded box corners instead of square ones (default: False)
+    compact=True,  # No blank rows above and below box text (default: True)
     font="Cascadia Code",  # Font for PNG output (default: None, uses system font)
     title="My Diagram",  # Optional title banner with double-line border (default: None)
     direction="TB",  # Flow direction: "TB" (top-to-bottom) or "LR" (left-to-right)
@@ -320,6 +421,8 @@ result = generator.generate("""
 
 This produces a horizontal flowchart where nodes flow from left to right, which can be more compact for linear processes.
 
+Spacing options are minimums. A gap grows when more lines have to pass through it than fit, and it never shrinks below what you asked for.
+
 ### Group Boxes (Experimental)
 
 Group boxes let you visually cluster related nodes together within a labeled container. This is useful for showing subsystems, modules, or logical groupings.
@@ -348,29 +451,36 @@ print(result)
 - Text after the colon is a space-separated list of node names
 - Multi-word node names work automatically (matched against nodes in edges)
 
-**Example output**:
+**Example output** (with `direction="LR"`):
 ```
-     API LAYER
-┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
-┆                   ┆░
-┆  ┌───────────┐    ┆░
-┆  │  Gateway  │░   ┆░
-┆  └───────────┘░   ┆░
-┆    ░░░░░░░░░░░░   ┆░
-┆        │          ┆░
-┆        ▼          ┆░
-┆  ┌───────────┐    ┆░
-┆  │   Auth    │░   ┆░
-┆  └───────────┘░   ┆░
-┆    ░░░░░░░░░░░░   ┆░
-└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
- ░░░░░░░░░░░░░░░░░░░░░
+    API Layer                      Data Layer
+┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐             ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+┆                ┆░            ┆                 ┆░
+┆                ┆░            ┆                 ┆░
+┆  ┌─────────┐   ┆░            ┆  ┌────────┐     ┆░
+┆  │ Gateway │───────────────────►│ Cache  │░    ┆░
+┆  └────┬────┘░  ┆░            ┆  └────────┘░    ┆░
+┆   ░░░░│░░░░░░  ┆░            ┆   ░░░░▲░░░░░    ┆░
+┆       │        ┆░            ┆       │         ┆░
+┆       │        ┆░            ┆       │         ┆░
+┆       │        ┆░            ┆       │         ┆░
+┆       ▼        ┆░            ┆       │         ┆░
+┆  ┌────────┐    ┆░            ┆  ┌────┴─────┐   ┆░
+┆  │  Auth  │────────────────────►│ Database │░  ┆░
+┆  └────────┘░   ┆░            ┆  └──────────┘░  ┆░
+┆   ░░░░░░░░░░   ┆░            ┆   ░░░░░░░░░░░░  ┆░
+┆                ┆░            ┆                 ┆░
+┆                ┆░            ┆                 ┆░
+┆                ┆░            ┆                 ┆░
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░            └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘░
+ ░░░░░░░░░░░░░░░░░░             ░░░░░░░░░░░░░░░░░░░
 ```
 
 **Rules**:
 - Each node can belong to at most one group
 - Group definitions must appear before any edge definitions
 - Nodes within groups are arranged perpendicular to the flow direction (horizontally in TB mode, vertically in LR mode)
+- Neighbouring boxes in a group are joined by a direct line; lines to other boxes cross the dashed border at right angles and never run through a group title
 
 ## Input Format
 
@@ -412,6 +522,11 @@ The main class for generating flowcharts.
 | `generate(input_text)` | Generate ASCII flowchart string |
 | `save_txt(input_text, filename)` | Save flowchart to a text file |
 | `save_png(input_text, filename, ...)` | Save flowchart as a PNG image |
+| `get_trace()` | Trace of the last `generate(..., debug=True)` call |
+
+| Attribute | Description |
+|-----------|-------------|
+| `last_renderer` | `"classic"` or `"planned"`: which renderer drew the last diagram |
 
 ### Convenience Functions
 
@@ -462,6 +577,18 @@ uv sync --dev
 
 ```bash
 uv run pytest
+```
+
+The integration tests render a corpus of several hundred diagrams in both
+directions and with every option that changes the picture, and check each one
+by reading the rendered text back:
+
+```bash
+uv run pytest tests/integration/test_complex_diagrams.py    # complex diagrams are clean
+uv run pytest tests/integration/test_planned_renderer.py    # the planning renderer on its own
+uv run pytest -k goldens                                    # simple diagrams are unchanged
+uv run python tests/integration/diagram_scorecard.py -v     # per-diagram summary
+uv run python tests/integration/diagram_scorecard.py cicd-TB  # show one diagram
 ```
 
 ### Run Linting

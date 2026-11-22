@@ -6,7 +6,7 @@ using Unicode box-drawing characters.
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 # Unicode box-drawing characters
 BOX_CHARS = {
@@ -533,11 +533,13 @@ class GroupBoxRenderer:
         width: int,
         height: int,
         title: str = "",
+        title_x: Optional[int] = None,
     ) -> None:
         """
         Draw a group box with dashed border.
 
-        The title is drawn centered above the top border of the box.
+        The title is drawn above the top border of the box, centered unless
+        ``title_x`` says otherwise.
 
         Args:
             canvas: The canvas to draw on.
@@ -546,6 +548,9 @@ class GroupBoxRenderer:
             width: Width of the group box.
             height: Height of the group box (including title row if present).
             title: Title text to display above the box.
+            title_x: Column where the title starts. Defaults to centered; a
+                caller passes this to keep the title clear of lines that
+                enter the group from above.
         """
         chars = self.chars
 
@@ -560,6 +565,8 @@ class GroupBoxRenderer:
         if title:
             # Center the title over the box
             title_start = x + (width - len(title)) // 2
+            if title_x is not None:
+                title_start = title_x
             canvas.draw_text(title_start, title_row, title)
 
         # Draw top border (solid corners, dashed line)
